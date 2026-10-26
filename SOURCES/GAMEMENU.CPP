@@ -34,7 +34,7 @@
 #include <POLYGON/POLYFILT.H>  /* POLY_TEX_FILTER_* (Texture filter row) */
 
 #include "GAMEMENU_MOUSE.H"
-#include "CONFIG_FILE.H" /* ConfigFile_MarkVSyncSetThisRun, ConfigFile_Setting (Graphics rows) */
+#include "CONFIG_FILE.H" /* ConfigFile_MarkVSyncSetThisRun, ConfigFile_SettingTable (Graphics rows) */
 #include "UI_LAYOUT.H"   /* UI_CENTER_X, UI_VCENTER_OFS */
 
 #include <dirent.h>
@@ -104,6 +104,7 @@ S32 FlagShowEndDemo = FALSE;
 #define MENU_ID_TEXTURE_FILTER 2119
 #define MENU_ID_DITHER_SHADING 2120
 #define MENU_ID_PRESENT_FILTER 2121
+#define MENU_ID_RAIN_SCALE 2122
 
 // Resolution sub-page rows occupy a reserved id range: row i carries id
 // MENU_ID_RESOLUTION_BASE + i, which BuildCustomMenuText and GereResolutionMenu
@@ -181,14 +182,15 @@ U16 DisplayMenu[] = {
     MENU_ID_DISPLAY_FULLSCREEN,
 };
 
-// Graphics submenu: the rendering options BootSettings (CONFIG_FILE.CPP) own,
-// one cycling row each. Every row reads and writes its T_SETTING through
-// ConfigFile_Setting, so the range, the default and the "set this run" mark
-// that keeps a menu choice from being overwritten by a per-run environment
+// Graphics submenu: the rendering options the settings tables own (the
+// rasterizer and present rows in CONFIG_FILE.CPP, the rain row in
+// RAIN_SCALE.CPP), one cycling row each. Every row reads and writes its
+// T_SETTING through the table, so the range, the default and the "set this run"
+// mark that keeps a menu choice from being overwritten by a per-run environment
 // override all live in the table and nowhere here. See GereGraphicsMenu.
 U16 GraphicsMenu[] = {
     0,   // selected
-    4,   // nb entries
+    5,   // nb entries
     260, // y center
     0,   // .dia num
 
@@ -200,6 +202,8 @@ U16 GraphicsMenu[] = {
     MENU_ID_DITHER_SHADING,
     0,
     MENU_ID_PRESENT_FILTER,
+    0,
+    MENU_ID_RAIN_SCALE,
 };
 
 // Resolution sub-page, opened from the Display submenu's Resolution row.
@@ -434,12 +438,25 @@ const char *GetLocalizedResDialogLabel(int which) {
     return GetLocalizedMenuLabel(kMap[which]);
 }
 
-/* The live value of a Graphics row, read from the settings table rather than
-   from the global it writes, so the menu cannot name a variable the table does
-   not own. A key the table lacks is a programming error; the row then shows
-   its first value rather than reading through NULL. */
+/* A Graphics row's setting by its lba2.cfg key, from whichever table owns it:
+   the menu names the key and never the variable behind it. */
+static const T_SETTING *GraphicsSetting(const char *key) {
+    const T_SETTING *table;
+    S32 count, t, i;
+
+    for (t = 0; (table = ConfigFile_SettingTable(t, &count)) != NULL; t++) {
+        for (i = 0; i < count; i++) {
+            if (table[i].key != NULL && strcmp(table[i].key, key) == 0)
+                return &table[i];
+        }
+    }
+    return NULL;
+}
+
+/* The live value of a Graphics row. A key no table has is a programming error;
+   the row then shows its first value rather than reading through NULL. */
 static S32 GraphicsSettingValue(const char *key) {
-    const T_SETTING *decl = ConfigFile_Setting(key);
+    const T_SETTING *decl = GraphicsSetting(key);
     return (decl != NULL) ? *decl->value : 0;
 }
 
@@ -449,7 +466,7 @@ static S32 GraphicsSettingValue(const char *key) {
    set it: without that mark a value that lands back on what LBA2_TEXFILTER or
    LBA2_PRESENT_FILTER forced would be written back at the stored preference. */
 static void GraphicsSettingCycle(const char *key) {
-    const T_SETTING *decl = ConfigFile_Setting(key);
+    const T_SETTING *decl = GraphicsSetting(key);
     if (decl == NULL)
         return;
     Settings_Apply(decl, (*decl->value >= decl->max) ? decl->min : *decl->value + 1);
@@ -558,6 +575,12 @@ static void BuildCustomMenuText(S32 num, char *string) {
                                                                             : MENU_LABEL_PRESENT_NEAREST));
         break;
     }
+
+    case MENU_ID_RAIN_SCALE:
+        CopyUtf8ToCp850(string, 256,
+                        GetLocalizedMenuLabel(GraphicsSettingValue("RainScale") ? MENU_LABEL_RAIN_SCALED
+                                                                                : MENU_LABEL_RAIN_ORIGINAL));
+        break;
 
     case MENU_ID_FOLLOW_CAMERA:
         CopyUtf8ToCp850(string, 256, GetLocalizedMenuLabel(FollowCamera ? MENU_LABEL_AUTO_CAMERA : MENU_LABEL_CLASSIC_CAMERA));
@@ -3506,9 +3529,10 @@ S32 GereDisplayMenu(void) {
 
 // Graphics submenu: a self-contained submenu of OptionsMenu, one cycling row
 // per rendering option. The Scaling row applies to the frame being shown; the
-// rasterizer rows show on the next scene frame, behind the shaded menu. All
-// persist with the rest of the settings through WriteConfigFile, as the
-// Display rows do.
+// rasterizer rows show on the next scene frame, behind the shaded menu; the
+// Rain row on the next storm frame, when GereRain (RAIN.CPP) grows the drop
+// count and AffRain reads the streak width. All persist with the rest of the
+// settings through WriteConfigFile, as the Display rows do.
 S32 GereGraphicsMenu(void) {
     S32 select;
     S32 flag = 0;
@@ -3539,6 +3563,10 @@ S32 GereGraphicsMenu(void) {
 
         case MENU_ID_PRESENT_FILTER:
             GraphicsSettingCycle("PresentFilter");
+            break;
+
+        case MENU_ID_RAIN_SCALE:
+            GraphicsSettingCycle("RainScale");
             break;
         }
     }

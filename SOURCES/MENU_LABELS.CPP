@@ -212,11 +212,11 @@ const struct MenuLabelRow LocalizedMenuLabels[MENU_LABEL_COUNT] = {
       "Fallos originales: a medida",
       "Bug originali: su misura",
       "Bugs originais: sob medida"}},
-    /* The Graphics submenu (GereGraphicsMenu): the software-rasterizer and
-       present-time options CONFIG_FILE.CPP's BootSettings own. One label per
-       value, like the Vsync rows, so a translation never has to format a
-       value word into a sentence. Rows stay under the 31 characters that fit
-       at 640x480. */
+    /* The Graphics submenu (GereGraphicsMenu): the rendering options the
+       settings tables own (the rasterizer and present rows in CONFIG_FILE.CPP,
+       the rain row in RAIN_SCALE.CPP). One label per value, like the Vsync
+       rows, so a translation never has to format a value word into a sentence.
+       Rows stay under the 31 characters that fit at 640x480. */
     {MENU_LABEL_GRAPHICS,
      {"Graphics",
       "Graphismes",
@@ -280,4 +280,20 @@ const struct MenuLabelRow LocalizedMenuLabels[MENU_LABEL_COUNT] = {
       "Escalado: pixel art",
       "Scaling: pixel art",
       "Escala: pixel art"}},
+    /* The storm's scale row (RAIN_SCALE.H): the 1997 drop count and one-pixel
+       streaks, or both scaled to the framebuffer. */
+    {MENU_LABEL_RAIN_ORIGINAL,
+     {"Rain: Original",
+      "Pluie : d'origine",
+      "Regen: Original",
+      "Lluvia: original",
+      "Pioggia: originale",
+      "Chuva: original"}},
+    {MENU_LABEL_RAIN_SCALED,
+     {"Rain: Scaled to resolution",
+      "Pluie : adaptée à l'écran",
+      "Regen: der Auflösung angepasst",
+      "Lluvia: según resolución",
+      "Pioggia: adattata allo schermo",
+      "Chuva: ajustada à resolução"}},
 };

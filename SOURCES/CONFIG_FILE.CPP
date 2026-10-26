@@ -14,6 +14,7 @@
 #include "MOUSE_CAPTURE.H"   /* MouseConfine */
 #include "RES_SWITCH.H"
 #include "RETAILFIX.H"         /* the retail fixes' settings */
+#include "RAIN_SCALE.H"        /* the storm's scale setting */
 #include <PLATFORM/PLATFORM.H> /* PLATFORM_FILTER_*, and why a mode was refused */
 #include <POLYGON/POLYFILT.H>  /* PolyTexFilter / EnvTexFilter */
 #include <SVGA/SCREEN.H>
@@ -227,9 +228,9 @@ static const T_SETTING GamepadSettings[] = {
 };
 #define GAMEPAD_SETTING_COUNT ((S32)(sizeof(GamepadSettings) / sizeof(GamepadSettings[0])))
 
-/* Every settings table, for whatever has to walk all of them: the recording
- * header today. This file already reads and writes each one, so it is the place
- * that knows the whole set. Returns NULL past the last table. */
+/* Every settings table, for whatever has to walk all of them. This file
+ * already reads and writes each one, so it is the place that knows the whole
+ * set. Returns NULL past the last table. */
 const T_SETTING *ConfigFile_SettingTable(S32 i, S32 *count) {
     switch (i) {
     case 0:
@@ -247,6 +248,8 @@ const T_SETTING *ConfigFile_SettingTable(S32 i, S32 *count) {
         return Audio_Settings(count);
     case 5:
         return RetailFix_Settings(count);
+    case 6:
+        return RainScale_Settings(count);
     default:
         *count = 0;
         return NULL;
@@ -389,6 +392,7 @@ void ReadConfigFile(void) {
     Settings_ReadConfig(MouseSettings, MOUSE_SETTING_COUNT);
     FollowCam_ReadConfig();
     RetailFix_ReadConfig();
+    RainScale_ReadConfig();
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -466,6 +470,7 @@ void WriteConfigFile(void) {
     Settings_WriteConfig(MouseSettings, MOUSE_SETTING_COUNT);
     FollowCam_WriteConfig();
     RetailFix_WriteConfig();
+    RainScale_WriteConfig();
 
     if (batched) {
         DefFileBufferEndBatch();

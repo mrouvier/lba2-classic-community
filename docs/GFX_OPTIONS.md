@@ -4,7 +4,7 @@ Variables and locations that can be changed or exposed as options to improve gra
 
 ## Shipped options
 
-All four are off by default, so a stock run renders exactly as before. Three of them have a row in the Options → Graphics submenu (see [MENU.md](MENU.md)); interior render scaling is read once at startup and stays environment-only. All of them can also be set from the console or the config file.
+All five are off by default, so a stock run renders exactly as before. Four of them have a row in the Options → Graphics submenu (see [MENU.md](MENU.md)); interior render scaling is read once at startup and stays environment-only. All of them can also be set from the console or the config file.
 
 | Option | Menu row | Console | lba2.cfg | Environment | Values |
 |--------|----------|---------|----------|-------------|--------|
@@ -12,6 +12,7 @@ All four are off by default, so a stock run renders exactly as before. Three of 
 | Dithered shading | Dithered shading | `gfx_dither` | `DitherShading` | (none) | 0 off, 1 on |
 | Interior render scaling | (none) | (none) | (none) | `LBA2_ISO_DIV` | 1 off, 2 to 4 |
 | Present filter | Scaling | `gfx_presentfilter` | `PresentFilter` | `LBA2_PRESENT_FILTER` | 0 nearest, 1 linear, 2 pixelart |
+| Rain scale | Rain | `gfx_rain_scale` | `RainScale` | (none) | 0 the 1997 storm, 1 scaled to the framebuffer |
 
 **Texture filtering** smooths magnified texels on terrain, sea, and sky. The rasterizer works in palette indices, where averaging two entries is meaningless, so the blend is a precomputed table of the nearest palette index to each 25/50/75% RGB mix. Costs roughly 7% of frame time on terrain and 4% on a sea-heavy view at 1728x1080 with the 4-tap setting.
 
@@ -41,8 +42,17 @@ gfx_presentfilter 2
 LBA2_PRESENT_FILTER=pixelart ./lba2cc
 ```
 
+**Rain scale** keeps the Citadel storm as dense on screen at any resolution as it was at 640x480. The original runs 200 drops in a world box sized for its view and draws each as a one-pixel streak (`InitOneRain` and `AffRain` in [SOURCES/RAIN.CPP](../SOURCES/RAIN.CPP)). The exterior focal does not change with the resolution, so a bigger frame is a wider view: it reaches past that box and shows its drops over more pixels, 6.75 times the area at 1920x1080 with the same 200 hairlines in it. With the setting on, the box grows with the view (its sides with the width over 640, its height with the height over 480), the drop count grows with the box so the drops stay as dense in the world (351 at 848x480, 1200 at 1280x720, 4050 at 1920x1080), and a streak is as many columns wide as one pixel of a 480-line frame is tall (two from 720 lines). At 640x480 it changes nothing. The arithmetic is `RainScale_Count`, `RainScale_Span` and `RainScale_Width` in [SOURCES/RAIN_SCALE.H](../SOURCES/RAIN_SCALE.H), covered by `tests/rain_scale`. Not measured on retail data; the frame cost at 1080p is the projection of the extra drops and the streaks drawn twice.
+
+A scaled storm adds one dirty box per frame, the union of its streaks, where the 1997 storm adds one per drop (`RainScale_BoxAdd` in [SOURCES/RAIN_SCALE.CPP](../SOURCES/RAIN_SCALE.CPP)). The list merges a storm's boxes under its pool's pressure anyway, and it walks itself on every add, which a storm of thousands cannot afford.
+
+The setting is recorded: every drop takes three values from the shared random stream when it starts and whenever `AffRain` or `GereRain` restarts it (`InitOneRain`), so the count is game state, and with the setting on it follows the resolution, which the recording header already carries and compares as `mode.resolution`. The count follows the resolution the player chose (`Res_BaseDimensions`), so an interior drawn at a divided size under `LBA2_ISO_DIV` does not reach it. The exterior field-of-view lock proposed in #734 would make the projection itself scale with the height; the two do not compose yet, and with both on the storm would be denser than either intends.
+
+```
+gfx_rain_scale 1
+```
+
 ## Ideas not yet wired up
 
 - DetailLevel and Shadow are stored in lba2.cfg and exposed via the Options menu; see [CONFIG.md](CONFIG.md) for the full key list.
-- `RAIN_RANGE` in `SOURCES/3DEXT/LINERAIN.ASM` controls how far the rain effect is drawn in the original ASM implementation.
-- In the community build, the rain line routine is compiled from `SOURCES/3DEXT/LINERAIN.CPP` by default; the ASM file is kept for historical reference. If you want a user-facing option for rain draw distance in modern builds, consider wiring it through the C++ implementation rather than only tweaking the ASM constant.
+- `RAIN_RANGE` in `SOURCES/3DEXT/LINERAIN.ASM` (200) is not a draw distance. It is the depth window, in Z-buffer units around a drop's own depth: a pixel nearer than that window hides the streak, one inside it is the ground (bit 2 of `LineRain`'s return, always with bit 1), and `AffRain` turns the drop into its splash there (the `eclat des gouttes`, `Timer` set) and restarts it once the splash has played. The C++ port, `SOURCES/3DEXT/LINERAIN.CPP`, carries it as the literals 100 and 200 and is held to the ASM by `test_linerain`, so a change to it goes through both.

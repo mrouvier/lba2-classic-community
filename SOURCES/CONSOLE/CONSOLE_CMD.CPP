@@ -12,7 +12,8 @@
 #include "../DISTRIB.H"
 #include "../FOLLOWCAM.H" // cam_* cvars and the camtrace toggle
 #include "../PLAYACF.H"
-#include "../RETAILFIX.H" // fix_* cvars
+#include "../RETAILFIX.H"  // fix_* cvars
+#include "../RAIN_SCALE.H" // gfx_rain_scale
 #include <POLYGON/POLYFILT.H>
 
 extern S32 GfxDitherShading;
@@ -2690,6 +2691,7 @@ void Console_RegisterAll(void) {
      * registered from their settings tables, with ConfigFile_RegisterCvars. */
     FollowCam_RegisterCvars();
     RetailFix_RegisterCvars();
+    RainScale_RegisterCvars();
     ConfigFile_RegisterCvars();
     Audio_RegisterCvars();
 }

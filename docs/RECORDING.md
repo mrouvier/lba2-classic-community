@@ -701,10 +701,12 @@ absent. Neither is a divergence; both say which settings the replay could not ch
 
 The exception is a setting added after the header carried every setting: a recording without it was
 made before it existed, so it ran on the setting's value from before, and the replay borrows that
-and says so (`SETTING_ABSENT_BEFORE` in `SETTINGS.H`). The terrain-seams retail fix,
-`RetailFixTerrainSeams`, is the one that does, because its depths reach rain splashes and the
-random stream: an older recording replays with the outdoor ground on the float path it was made
-on, whatever **Fix retail bugs** says, and the console reads
+and says so (`SETTING_ABSENT_BEFORE` in `SETTINGS.H`). Two rows do. The terrain-seams retail fix,
+`RetailFixTerrainSeams`, because its depths reach rain splashes and the random stream: an older
+recording replays with the outdoor ground on the float path it was made on, whatever **Fix retail
+bugs** says. And the storm's scale, `RainScale`, because every drop it adds draws from the random
+stream: an older recording replays with the 1997 storm, whatever the Graphics menu says. The
+console reads
 
 ```
 [rec] this recording predates RetailFixTerrainSeams: replaying at its value from before, 0 (yours: 1, given back when it ends)
