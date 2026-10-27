@@ -52,8 +52,9 @@ extern S32 SeaMotion;
 #define SEA_FX_DRIFT_U 768
 #define SEA_FX_DRIFT_V 384
 
-/* The step the offset moves by: an eighth of a texel, under a pixel of the
-   nearest sea at 1080 lines. The sea is filled again only when the offset
+/* The step the offset moves by: an eighth of a texel, about half a pixel of
+   the near sea at the lighthouse at 1080 lines and one to two pixels from a
+   low camera over open water. The sea is filled again only when the offset
    reaches the next step, so the current costs a refill about 24 times a
    second rather than every frame, and a still frame between two steps costs
    nothing. */
@@ -75,24 +76,27 @@ static inline U16 SeaFx_Shift(U16 uv, S32 origin) {
     return (U16)((S32)uv + origin);
 }
 
-/* The chop's phase at game time t (ms): the finer layer steps one of its own
-   texels every SEA_FX_CHOP_MS, against the current, so the two layers slide
-   across each other. In finer texels, within its page. */
-#define SEA_FX_CHOP_MS 125
+/* The chop's phase at game time t (ms): a step every SEA_FX_CHOP_MS, which
+   moves the finer layer one of its own texels (about half a page texel)
+   against the current, along one of its axes and then the other, so the two
+   layers slide across each other in steps about half the size and twice as
+   often as one diagonal step would make. 256 steps take the layer once round
+   its page on both axes. */
+#define SEA_FX_CHOP_MS 83
 static inline S32 SeaFx_ChopPhase(U32 t) {
-    return (S32)((SEA_FX_PAGE - (S32)((t / SEA_FX_CHOP_MS) % SEA_FX_PAGE)) % SEA_FX_PAGE);
+    return (S32)((t / SEA_FX_CHOP_MS) & 255);
 }
 
 /* Where texel (u, v) of the choppy page takes its finer texel from, as an
    offset into the 256-byte rows of the page: the page itself at twice the
-   frequency turned by about 27 degrees, (2u + v, 2v - u), plus the phase on
-   both axes, wrapped to the page. Turned, because the page has rows of dark
-   patches every half page, and an axis-aligned copy at twice the frequency
-   lines them up into stripes that run to the horizon; at an angle they break
-   into short slanted ripples. */
+   frequency turned by about 27 degrees, (2u + v, 2v - u), shifted back by the
+   phase's half steps on each axis in turn, wrapped to the page. Turned,
+   because the page has rows of dark patches every half page, and an
+   axis-aligned copy at twice the frequency lines them up into stripes that
+   run to the horizon; at an angle they break into short slanted ripples. */
 static inline S32 SeaFx_FineTexel(S32 u, S32 v, S32 phase) {
-    const S32 fu = (2 * u + v + phase) & (SEA_FX_PAGE - 1);
-    const S32 fv = (2 * v - u + phase) & (SEA_FX_PAGE - 1);
+    const S32 fu = (2 * u + v - ((phase + 1) >> 1)) & (SEA_FX_PAGE - 1);
+    const S32 fv = (2 * v - u - (phase >> 1)) & (SEA_FX_PAGE - 1);
     return fv * 256 + fu;
 }
 
@@ -122,8 +126,11 @@ static inline S32 SeaFx_MeanStep(const U8 *page, S32 pitch) {
 
 /* A background object baked into the background: in the box (x0, y0)-(x1, y1),
    note in `keep` every pixel where the frame `log` differs from the
-   background `screen` it is about to be copied over, which is what the object
-   drew. Buffers of `pitch` bytes a row; the box inclusive and inside them. */
+   background `screen` it is about to be copied over: what the bake changes,
+   which is what the object drew except where it drew the very colour already
+   under it. Such a pixel is not noted and moves with the sea under it; it is
+   the sea's colour on the frame that baked it, a colour the sea's ramp holds.
+   Buffers of `pitch` bytes a row; the box inclusive and inside them. */
 static inline void SeaFx_NoteDrawn(const U8 *log, const U8 *screen, U8 *keep, S32 pitch, S32 x0, S32 y0, S32 x1,
                                    S32 y1) {
     S32 x, y;
@@ -149,6 +156,12 @@ static inline void SeaFx_PutBack(U8 *log, const U8 *screen, const U8 *keep, S32 
 /* A full redraw starts (AffGrilleExt): forget the quads and the baked pixels
    of the last one, and set this frame's offset and page. */
 extern void SeaFx_FrameBegin(void);
+
+/* The full redraw is drawn (AffGrilleExt, beside FiltreAnimatedPolys, still
+   in the Z-buffered bank): forget the quads the terrain hides whole, so a
+   refill fills and copies only sea there is to see, and none when the sea is
+   all behind the land. */
+extern void SeaFx_DropHidden(void);
 
 /* The texture the sea is drawn from: SkySeaTexture, or the choppy page. */
 extern U8 *SeaFx_Map(U8 *skySea);

@@ -346,6 +346,7 @@ void AffGrilleExt() {
     ManageSystem(); // for streaming
 
     FiltreAnimatedPolys();
+    SeaFx_DropHidden();
 
     Switch_Fillers(FILL_POLY_TEXTURES);
 

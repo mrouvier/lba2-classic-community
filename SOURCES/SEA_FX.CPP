@@ -6,6 +6,7 @@
 #include <POLYGON/POLY.H>     /* Fill_Poly, Switch_Fillers, PtrMap, RepMask */
 #include <POLYGON/POLYFILT.H> /* PolyTexFilterNZW: the refill keeps the texture filter */
 #include <SVGA/CLIP.H>        /* ClipXMin.. ClipYMax, UnsetClip */
+#include <SVGA/CPYBLOCK.H>    /* CopyBlock: the background put back under the refill */
 #include <SVGA/DIRTYBOX.H>    /* BoxStaticAdd, BoxBlitStaticListToScreen */
 #include <SVGA/SCREEN.H>      /* Log, Screen, ModeDesiredX/Y */
 #include <SYSTEM/TIMER.H>     /* TimerRefHR, the current's clock */
@@ -48,13 +49,20 @@ static T_SEA_QUAD s_quads[SEA_FX_MAX_QUADS];
 static S32 s_count = 0;
 static S32 s_overflow = 0;
 
+/* The frame the quads were projected into, so a refill after a resolution
+   switch and before the next full redraw stands down rather than fill the
+   old frame's corners into the new one. */
+static S32 s_framePitch = 0, s_frameRows = 0;
+
 /* The offset and chop phase the sea was last filled with, by the full redraw
    or a refill; a refill with nothing new to show does nothing. */
 static S32 s_originU = 0, s_originV = 0;
 static S32 s_filledPhase = -1;
 
 /* The choppy page, laid out as SkySeaTexture is (256 bytes a row, the sea in
-   the first 128 columns), and the chop phase it was composed at. */
+   the first 128 columns), and the chop phase it was composed at; -1 when it
+   has to be composed again, which each full redraw asks for, since an island
+   load replaces SkySeaTexture in place. */
 static U8 s_page[SEA_FX_PAGE * 256];
 static S32 s_pagePhase = -1;
 
@@ -113,10 +121,25 @@ static void ClearBaked(void) {
 void SeaFx_FrameBegin(void) {
     s_count = 0;
     s_overflow = 0;
+    s_framePitch = (S32)ScreenPitch;
+    s_frameRows = (S32)ModeDesiredY;
+    s_pagePhase = -1;
     if (s_keep != NULL)
         ClearBaked();
     if (SeaMotion)
         (void)SetFrame(TimerRefHR);
+}
+
+void SeaFx_DropHidden(void) {
+    S32 q = 0;
+
+    while (q < s_count) {
+        Fill_Poly(POLY_FLAG_ZBUFFER, 0, s_quads[q].n, s_quads[q].pts);
+        if (IsPolygonHidden)
+            s_quads[q] = s_quads[--s_count];
+        else
+            q++;
+    }
 }
 
 U8 *SeaFx_Map(U8 *skySea) {
@@ -147,7 +170,7 @@ void SeaFx_Baked(S32 x0, S32 y0, S32 x1, S32 y1) {
     const S32 pitch = (S32)ScreenPitch;
     const S32 rows = (S32)ModeDesiredY;
 
-    if (!SeaMotion || !s_count)
+    if (!SeaMotion || !s_count || CubeMode != CUBE_EXTERIEUR || pitch != s_framePitch || rows != s_frameRows)
         return;
 
     if (s_keep == NULL || s_keepPitch != pitch || s_keepRows != rows) {
@@ -194,39 +217,26 @@ void SeaFx_Refill(void) {
 
     if (!SeaMotion || !s_count || s_overflow)
         return;
+    if ((S32)ScreenPitch != s_framePitch || (S32)ModeDesiredY != s_frameRows)
+        return;
 
     if (!SetFrame(TimerRefHR))
         return;
 
-    Switch_Fillers(FILL_POLY_FOG_NZW);
-    PolyTexFilterNZW = 1;
-    PtrMap = SeaFx_Map(SkySeaTexture);
-    RepMask = 0x7F7F;
     UnsetClip();
-
     for (q = 0; q < s_count; q++) {
         const T_SEA_QUAD *quad = &s_quads[q];
         for (i = 0; i < quad->n; i++) {
-            pts[i] = quad->pts[i];
-            pts[i].Pt_MapU = SeaFx_Shift(pts[i].Pt_MapU, s_originU);
-            pts[i].Pt_MapV = SeaFx_Shift(pts[i].Pt_MapV, s_originV);
-            if (pts[i].Pt_XE < bx0)
-                bx0 = pts[i].Pt_XE;
-            if (pts[i].Pt_XE > bx1)
-                bx1 = pts[i].Pt_XE;
-            if (pts[i].Pt_YE < by0)
-                by0 = pts[i].Pt_YE;
-            if (pts[i].Pt_YE > by1)
-                by1 = pts[i].Pt_YE;
+            if (quad->pts[i].Pt_XE < bx0)
+                bx0 = quad->pts[i].Pt_XE;
+            if (quad->pts[i].Pt_XE > bx1)
+                bx1 = quad->pts[i].Pt_XE;
+            if (quad->pts[i].Pt_YE < by0)
+                by0 = quad->pts[i].Pt_YE;
+            if (quad->pts[i].Pt_YE > by1)
+                by1 = quad->pts[i].Pt_YE;
         }
-        Fill_Poly(POLY_TEXTURE_Z_FOG, 0, quad->n, pts);
     }
-
-    PolyTexFilterNZW = 0;
-    PtrMap = saveMap;
-    RepMask = saveRep;
-    Switch_Fillers(FILL_POLY_TEXTURES);
-
     if (bx0 < ClipXMin)
         bx0 = ClipXMin;
     if (by0 < ClipYMin)
@@ -238,12 +248,36 @@ void SeaFx_Refill(void) {
     if (bx1 < bx0 || by1 < by0)
         return;
 
+    /* The frame takes the background over the box first: whatever the frame
+       still holds there that the background does not, left by a modal that
+       emptied the box lists, would otherwise reach the background with the
+       sea and stay. */
+    CopyBlock(bx0, by0, bx1, by1, Screen, bx0, by0, Log);
+
+    Switch_Fillers(FILL_POLY_FOG_NZW);
+    PolyTexFilterNZW = 1;
+    PtrMap = SeaFx_Map(SkySeaTexture);
+    RepMask = 0x7F7F;
+    for (q = 0; q < s_count; q++) {
+        const T_SEA_QUAD *quad = &s_quads[q];
+        for (i = 0; i < quad->n; i++) {
+            pts[i] = quad->pts[i];
+            pts[i].Pt_MapU = SeaFx_Shift(pts[i].Pt_MapU, s_originU);
+            pts[i].Pt_MapV = SeaFx_Shift(pts[i].Pt_MapV, s_originV);
+        }
+        Fill_Poly(POLY_TEXTURE_Z_FOG, 0, quad->n, pts);
+    }
+    PolyTexFilterNZW = 0;
+    PtrMap = saveMap;
+    RepMask = saveRep;
+    Switch_Fillers(FILL_POLY_TEXTURES);
+
     /* The background objects baked over the sea: their pixels, still in the
        background, go back into the frame before the frame goes there. */
     for (q = 0; q < s_bakedCount; q++) {
-        const T_SEA_BOX *b = &s_baked[q];
-        const S32 x0 = (b->x0 > bx0) ? b->x0 : bx0, x1 = (b->x1 < bx1) ? b->x1 : bx1;
-        const S32 y0 = (b->y0 > by0) ? b->y0 : by0, y1 = (b->y1 < by1) ? b->y1 : by1;
+        const T_SEA_BOX *bk = &s_baked[q];
+        const S32 x0 = (bk->x0 > bx0) ? bk->x0 : bx0, x1 = (bk->x1 < bx1) ? bk->x1 : bx1;
+        const S32 y0 = (bk->y0 > by0) ? bk->y0 : by0, y1 = (bk->y1 < by1) ? bk->y1 : by1;
         if (x0 <= x1 && y0 <= y1)
             SeaFx_PutBack((U8 *)Log, (const U8 *)Screen, s_keep, s_keepPitch, x0, y0, x1, y1);
     }

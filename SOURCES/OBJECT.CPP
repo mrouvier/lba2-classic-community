@@ -5485,8 +5485,8 @@ startaffscene:
         if (!FlagAnimWhoSpeak) {
             RestoreCinemaMode(); // Scrolle les bandes noires
             if (CubeMode == CUBE_EXTERIEUR) {
-                SeaFx_Refill();
                 DrawAnimatedPolys();
+                SeaFx_Refill();
             }
         }
         break;

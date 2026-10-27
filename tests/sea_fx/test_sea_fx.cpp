@@ -54,12 +54,18 @@ static void test_a_shifted_corner_fits(void) {
 static void test_the_chop_steps_against_the_current(void) {
     ASSERT_EQ_INT(0, SeaFx_ChopPhase(0));
     ASSERT_EQ_INT(0, SeaFx_ChopPhase(SEA_FX_CHOP_MS - 1));
-    ASSERT_EQ_INT(SEA_FX_PAGE - 1, SeaFx_ChopPhase(SEA_FX_CHOP_MS));
-    ASSERT_EQ_INT(SEA_FX_PAGE - 2, SeaFx_ChopPhase(2 * SEA_FX_CHOP_MS));
-    ASSERT_EQ_INT(0, SeaFx_ChopPhase(SEA_FX_PAGE * SEA_FX_CHOP_MS));
+    ASSERT_EQ_INT(1, SeaFx_ChopPhase(SEA_FX_CHOP_MS));
+    ASSERT_EQ_INT(0, SeaFx_ChopPhase(256 * SEA_FX_CHOP_MS));
     for (U32 t = 0; t < 100000; t += 777) {
         const S32 p = SeaFx_ChopPhase(t);
-        ASSERT_TRUE(p >= 0 && p < SEA_FX_PAGE);
+        ASSERT_TRUE(p >= 0 && p < 256);
+    }
+    /* Each step moves the finer layer one texel back along one axis, the two
+       axes in turn, and 256 steps bring it round to where it started. */
+    for (S32 p = 0; p < 256; p++) {
+        const S32 a = SeaFx_FineTexel(10, 20, p), b = SeaFx_FineTexel(10, 20, (p + 1) & 255);
+        const S32 du = ((a & 255) - (b & 255)) & (SEA_FX_PAGE - 1), dv = ((a >> 8) - (b >> 8)) & (SEA_FX_PAGE - 1);
+        ASSERT_TRUE((du == 1 && dv == 0) || (du == 0 && dv == 1));
     }
 }
 
@@ -76,7 +82,9 @@ static void test_the_fine_texel_stays_in_the_page(void) {
     /* (2u + v, 2v - u): one step along a row is two across and one back down. */
     ASSERT_EQ_INT(127 * 256 + 2, SeaFx_FineTexel(1, 0, 0));
     ASSERT_EQ_INT(2 * 256 + 1, SeaFx_FineTexel(0, 1, 0));
-    ASSERT_EQ_INT(5 * 256 + 5, SeaFx_FineTexel(0, 0, 5));
+    /* The phase's half steps, U first. */
+    ASSERT_EQ_INT(0 * 256 + 127, SeaFx_FineTexel(0, 0, 1));
+    ASSERT_EQ_INT(127 * 256 + 127, SeaFx_FineTexel(0, 0, 2));
 }
 
 static void test_the_chop_keeps_the_ramp(void) {
@@ -149,6 +157,24 @@ static void test_a_baked_object_survives_the_refill(void) {
     ASSERT_EQ_INT(1, keep[3 * W + 5]);
 }
 
+/* A pixel the object drew in the very colour of the background under it is
+   not told from the background, so it is not noted and moves with the sea. */
+static void test_a_pixel_the_colour_of_the_sea_is_not_noted(void) {
+    enum { W = 4,
+           H = 2 };
+    U8 log[W * H], screen[W * H], keep[W * H];
+    for (S32 i = 0; i < W * H; i++) {
+        screen[i] = 0x40;
+        log[i] = 0x40;
+        keep[i] = 0;
+    }
+    log[1] = 0x90; /* the object */
+    log[2] = 0x40; /* the object, drawn in the sea's own colour */
+    SeaFx_NoteDrawn(log, screen, keep, W, 0, 0, W - 1, H - 1);
+    ASSERT_EQ_INT(1, keep[1]);
+    ASSERT_EQ_INT(0, keep[2]);
+}
+
 int main(void) {
     RUN_TEST(test_the_offset_stays_in_a_page);
     RUN_TEST(test_the_offset_moves_at_the_current);
@@ -159,6 +185,7 @@ int main(void) {
     RUN_TEST(test_the_mean_leaves_a_texel);
     RUN_TEST(test_the_mean_step);
     RUN_TEST(test_a_baked_object_survives_the_refill);
+    RUN_TEST(test_a_pixel_the_colour_of_the_sea_is_not_noted);
     TEST_SUMMARY();
     return test_failures != 0;
 }

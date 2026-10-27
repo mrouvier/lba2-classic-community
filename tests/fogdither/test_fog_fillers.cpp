@@ -219,6 +219,7 @@ static void setup_terrain_pass(S32 type) {
     for (int i = 0; i < TEST_CLUT_SIZE; i++)
         g_test_clut[i] = (U8)((i & 0xFF) ^ ((i >> 8) * 0x1D));
     PtrCLUTGouraud = g_test_clut;
+    PtrCLUTFog = g_test_clut; /* the perspective fog filler's, the sea's */
     for (int i = 0; i < 256; i++)
         Fill_Logical_Palette[i] = (U8)(i * 7 + 3);
     init_test_zbuffer(0xFFFF);
@@ -246,6 +247,18 @@ static void draw_terrain(S32 type, U32 bank, S32 filter, S32 scope) {
     pts[0] = terrain_point(10, 8, 0, 0, 0x0400);
     pts[1] = terrain_point(40, 112, 9 << 8, 31 << 8, 0x0700);
     pts[2] = terrain_point(150, 30, 37 << 8, 5 << 8, 0x0C00);
+    if (type == POLY_TEXTURE_Z_FOG) {
+        /* The sea's polygon type: depths that differ across the triangle, and
+           a fog range over them, so several fog rows are drawn. */
+        pts[0].Pt_ZO = 0x1000;
+        pts[0].Pt_W = 0x18000;
+        pts[1].Pt_ZO = 0x6000;
+        pts[1].Pt_W = 0x0C000;
+        pts[2].Pt_ZO = 0xB000;
+        pts[2].Pt_W = 0x08000;
+        Fill_ScaledFogNear = 0;
+        Fill_Fog_Factor = 0x400;
+    }
     PolyTexFilter = filter;
     PolyTexFilterNZW = scope;
     Poly_EnsureBlendLUT();
@@ -323,6 +336,11 @@ static void test_the_redraw_keeps_the_filter(void) {
     check_redraw(POLY_TEXTURE_GOURAUD, "texture Gouraud");
     check_redraw(POLY_TEXTURE_INCRUST, "chroma-key texture fog");
     check_redraw(POLY_TEXTURE_INCRUST_GOURAUD, "chroma-key texture Gouraud");
+    /* The sea's own filler, which its refill draws through, dithered or not. */
+    check_redraw(POLY_TEXTURE_Z_FOG, "perspective fog");
+    PolyFogDither = 1;
+    check_redraw(POLY_TEXTURE_Z_FOG, "perspective fog, dithered");
+    PolyFogDither = 0;
 }
 
 int main(void) {
