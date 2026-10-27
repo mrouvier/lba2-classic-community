@@ -1,4 +1,5 @@
 #include "RAIN_SCALE.H"
+#include "EXTFOV.H"     /* the view the storm fills, under the exterior view lock */
 #include "RES_SWITCH.H" /* Res_BaseDimensions: the resolution the player chose */
 #include "SETTINGS.H"
 #include "3DEXT/EXTERN.H" /* LineRain */
@@ -32,9 +33,20 @@ static void BaseFrame(S32 *w, S32 *h) {
     *h = (S32)bh;
 }
 
+/* The frame as the storm sees it. Under the exterior view lock a tall frame
+   shows the 1997 height of world and the width over the aspect, so the box and
+   the count follow that view; a streak is still one framebuffer pixel wide, so
+   its width follows the real height (RainScale_StreakWidth). */
+static void ViewFrame(S32 *w, S32 *h) {
+    S32 bw, bh;
+    BaseFrame(&bw, &bh);
+    *w = ExtFov_ViewWidth(ExteriorFov, bw, bh);
+    *h = ExtFov_ViewHeight(ExteriorFov, bh);
+}
+
 S32 RainScale_DropCount(void) {
     S32 w, h;
-    BaseFrame(&w, &h);
+    ViewFrame(&w, &h);
     return RainScale_Count(RainScale, w, h, RAIN_POOL);
 }
 
@@ -46,13 +58,13 @@ S32 RainScale_StreakWidth(void) {
 
 S32 RainScale_SpanXZ(S32 span) {
     S32 w, h;
-    BaseFrame(&w, &h);
+    ViewFrame(&w, &h);
     return RainScale_Span(RainScale, span, w, RAIN_BASE_W);
 }
 
 S32 RainScale_SpanY(S32 span) {
     S32 w, h;
-    BaseFrame(&w, &h);
+    ViewFrame(&w, &h);
     return RainScale_Span(RainScale, span, h, RAIN_BASE_H);
 }
 

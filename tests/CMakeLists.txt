@@ -119,6 +119,7 @@ add_subdirectory(le_access)
 add_subdirectory(ui_layout)
 add_subdirectory(settings)
 add_subdirectory(rain_scale)
+add_subdirectory(extfov)
 add_subdirectory(user_dirs)
 add_subdirectory(platform)
 

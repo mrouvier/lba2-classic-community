@@ -10,18 +10,19 @@ struct T_SETTING; /* SETTINGS.H; a pointer to a table needs no more */
 /* The storm at any framebuffer size.
  *
  * RAIN.CPP runs RAIN_DROPS drops in a world box sized for a 640x480 view
- * (InitOneRain) and draws each as a one-pixel streak. The exterior focal does
- * not change with the resolution (ChampX / ChampZ in 3DEXT/VAR_EXT.CPP), so a
- * bigger frame is a wider view: it reaches past that box and shows its drops
- * over more pixels. At 1920x1080 the Citadel storm is the same 200 hairlines
- * in 6.75 times the area.
+ * (InitOneRain) and draws each as a one-pixel streak. With the fixed focal
+ * (ExteriorFov 0, EXTFOV.H; ChampX / ChampZ in 3DEXT/VAR_EXT.CPP) a bigger
+ * frame is a wider view: it reaches past that box and shows its drops over
+ * more pixels. At 1920x1080 the Citadel storm is the same 200 hairlines in
+ * 6.75 times the area.
  *
  * RainScale sizes the storm for the frame instead. On, the box grows with the
  * view (its sides with the width over 640, its height with the height over
  * 480) so the frame's edges and upper rows see drops, the drop count follows
- * the frame's area over 640x480, which holds the streaks per pixel near the
- * 1997 ones, and a streak is as many columns wide as one pixel of a 480-line
- * frame is tall. Off, the default, is byte-identical to the original.
+ * the view's area over 640x480 (the frame's, or under the exterior view lock
+ * the 480-line view it defines, below), which holds the streaks per pixel near
+ * the 1997 ones, and a streak is as many columns wide as one pixel of a
+ * 480-line frame is tall. Off, the default, is byte-identical to the original.
  *
  * Recorded: every drop takes three values from the shared random stream when it
  * starts (InitRain, or GereRain for a drop the count gains) and whenever AffRain
@@ -35,7 +36,7 @@ struct T_SETTING; /* SETTINGS.H; a pointer to a table needs no more */
 
 /* The drop count for a w x h frame: RAIN_DROPS times the frame's area over
  * 640x480, rounded to nearest. The box grows by (w/640) squared times h/480, so
- * the world density falls as the box deepens along every ray of the fixed-focal
+ * the world density falls as the box deepens along every ray of a fixed-focal
  * view; counting by the box's volume instead would put several times the 1997
  * streaks on each pixel, where counting by area holds them within 1.2x at the
  * 530 camera preset and at 848x480, and within 1.5x at the 300 preset at 1080
@@ -98,8 +99,9 @@ static inline S32 RainScale_Width(S32 scale, S32 h) {
 }
 
 /* The same for the live framebuffer: the resolution the player chose, which
- * every exterior renders at. The spans take the 1997 literal and give what the
- * box needs on that axis. */
+ * every exterior renders at, measured as the exterior view lock (EXTFOV.H)
+ * defines the view, so the two settings compose. The spans take the 1997
+ * literal and give what the box needs on that axis. */
 extern S32 RainScale_DropCount(void);
 extern S32 RainScale_StreakWidth(void);
 extern S32 RainScale_SpanXZ(S32 span);

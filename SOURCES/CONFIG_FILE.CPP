@@ -15,6 +15,7 @@
 #include "RES_SWITCH.H"
 #include "RETAILFIX.H"         /* the retail fixes' settings */
 #include "RAIN_SCALE.H"        /* the storm's scale setting */
+#include "EXTFOV.H"            /* the exterior view's setting */
 #include <PLATFORM/PLATFORM.H> /* PLATFORM_FILTER_*, and why a mode was refused */
 #include <POLYGON/POLYFILT.H>  /* PolyTexFilter / EnvTexFilter */
 #include <SVGA/SCREEN.H>
@@ -250,6 +251,8 @@ const T_SETTING *ConfigFile_SettingTable(S32 i, S32 *count) {
         return RetailFix_Settings(count);
     case 6:
         return RainScale_Settings(count);
+    case 7:
+        return ExtFov_Settings(count);
     default:
         *count = 0;
         return NULL;
@@ -393,6 +396,7 @@ void ReadConfigFile(void) {
     FollowCam_ReadConfig();
     RetailFix_ReadConfig();
     RainScale_ReadConfig();
+    ExtFov_ReadConfig();
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -471,6 +475,7 @@ void WriteConfigFile(void) {
     FollowCam_WriteConfig();
     RetailFix_WriteConfig();
     RainScale_WriteConfig();
+    ExtFov_WriteConfig();
 
     if (batched) {
         DefFileBufferEndBatch();

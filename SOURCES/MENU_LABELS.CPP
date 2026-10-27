@@ -214,9 +214,10 @@ const struct MenuLabelRow LocalizedMenuLabels[MENU_LABEL_COUNT] = {
       "Bugs originais: sob medida"}},
     /* The Graphics submenu (GereGraphicsMenu): the rendering options the
        settings tables own (the rasterizer and present rows in CONFIG_FILE.CPP,
-       the rain row in RAIN_SCALE.CPP). One label per value, like the Vsync
-       rows, so a translation never has to format a value word into a sentence.
-       Rows stay under the 31 characters that fit at 640x480. */
+       the rain row in RAIN_SCALE.CPP, the exterior view row in EXTFOV.CPP). One
+       label per value, like the Vsync rows, so a translation never has to
+       format a value word into a sentence. Rows stay under the 31 characters
+       that fit at 640x480. */
     {MENU_LABEL_GRAPHICS,
      {"Graphics",
       "Graphismes",
@@ -296,4 +297,20 @@ const struct MenuLabelRow LocalizedMenuLabels[MENU_LABEL_COUNT] = {
       "Lluvia: según resolución",
       "Pioggia: adattata allo schermo",
       "Chuva: ajustada à resolução"}},
+    /* The exterior view row (EXTFOV.H): the fixed focal, or the 1997 vertical
+       view kept at any height. */
+    {MENU_LABEL_EXTFOV_ORIGINAL,
+     {"Exterior view: Original",
+      "Vue extérieure : d'origine",
+      "Außenansicht: Original",
+      "Vista exterior: original",
+      "Vista esterna: originale",
+      "Vista exterior: original"}},
+    {MENU_LABEL_EXTFOV_LOCKED,
+     {"Exterior view: Keep height",
+      "Vue extérieure : hauteur fixe",
+      "Außenansicht: Höhe fixiert",
+      "Vista exterior: altura fija",
+      "Vista esterna: altezza fissa",
+      "Vista exterior: altura fixa"}},
 };

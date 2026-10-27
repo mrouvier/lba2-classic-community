@@ -105,6 +105,7 @@ S32 FlagShowEndDemo = FALSE;
 #define MENU_ID_DITHER_SHADING 2120
 #define MENU_ID_PRESENT_FILTER 2121
 #define MENU_ID_RAIN_SCALE 2122
+#define MENU_ID_EXTERIOR_FOV 2123
 
 // Resolution sub-page rows occupy a reserved id range: row i carries id
 // MENU_ID_RESOLUTION_BASE + i, which BuildCustomMenuText and GereResolutionMenu
@@ -184,13 +185,13 @@ U16 DisplayMenu[] = {
 
 // Graphics submenu: the rendering options the settings tables own (the
 // rasterizer and present rows in CONFIG_FILE.CPP, the rain row in
-// RAIN_SCALE.CPP), one cycling row each. Every row reads and writes its
+// RAIN_SCALE.CPP, the exterior view row in EXTFOV.CPP), one cycling row each. Every row reads and writes its
 // T_SETTING through the table, so the range, the default and the "set this run"
 // mark that keeps a menu choice from being overwritten by a per-run environment
 // override all live in the table and nowhere here. See GereGraphicsMenu.
 U16 GraphicsMenu[] = {
     0,   // selected
-    5,   // nb entries
+    6,   // nb entries
     260, // y center
     0,   // .dia num
 
@@ -204,6 +205,8 @@ U16 GraphicsMenu[] = {
     MENU_ID_PRESENT_FILTER,
     0,
     MENU_ID_RAIN_SCALE,
+    0,
+    MENU_ID_EXTERIOR_FOV,
 };
 
 // Resolution sub-page, opened from the Display submenu's Resolution row.
@@ -580,6 +583,12 @@ static void BuildCustomMenuText(S32 num, char *string) {
         CopyUtf8ToCp850(string, 256,
                         GetLocalizedMenuLabel(GraphicsSettingValue("RainScale") ? MENU_LABEL_RAIN_SCALED
                                                                                 : MENU_LABEL_RAIN_ORIGINAL));
+        break;
+
+    case MENU_ID_EXTERIOR_FOV:
+        CopyUtf8ToCp850(string, 256,
+                        GetLocalizedMenuLabel(GraphicsSettingValue("ExteriorFov") ? MENU_LABEL_EXTFOV_LOCKED
+                                                                                  : MENU_LABEL_EXTFOV_ORIGINAL));
         break;
 
     case MENU_ID_FOLLOW_CAMERA:
@@ -3531,8 +3540,10 @@ S32 GereDisplayMenu(void) {
 // per rendering option. The Scaling row applies to the frame being shown; the
 // rasterizer rows show on the next scene frame, behind the shaded menu; the
 // Rain row on the next storm frame, when GereRain (RAIN.CPP) grows the drop
-// count and AffRain reads the streak width. All persist with the rest of the
-// settings through WriteConfigFile, as the Display rows do.
+// count and AffRain reads the streak width; the Exterior view row sets the
+// projection again as it changes (EXTFOV.CPP) and shows on the next scene
+// frame. All persist with the rest of the settings through WriteConfigFile, as
+// the Display rows do.
 S32 GereGraphicsMenu(void) {
     S32 select;
     S32 flag = 0;
@@ -3567,6 +3578,10 @@ S32 GereGraphicsMenu(void) {
 
         case MENU_ID_RAIN_SCALE:
             GraphicsSettingCycle("RainScale");
+            break;
+
+        case MENU_ID_EXTERIOR_FOV:
+            GraphicsSettingCycle("ExteriorFov");
             break;
         }
     }

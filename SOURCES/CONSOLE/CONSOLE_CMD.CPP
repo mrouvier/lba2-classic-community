@@ -14,6 +14,7 @@
 #include "../PLAYACF.H"
 #include "../RETAILFIX.H"  // fix_* cvars
 #include "../RAIN_SCALE.H" // gfx_rain_scale
+#include "../EXTFOV.H"     // gfx_fov
 #include <POLYGON/POLYFILT.H>
 
 extern S32 GfxDitherShading;
@@ -2692,6 +2693,7 @@ void Console_RegisterAll(void) {
     FollowCam_RegisterCvars();
     RetailFix_RegisterCvars();
     RainScale_RegisterCvars();
+    ExtFov_RegisterCvars();
     ConfigFile_RegisterCvars();
     Audio_RegisterCvars();
 }
