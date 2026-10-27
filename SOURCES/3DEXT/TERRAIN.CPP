@@ -1,8 +1,10 @@
 #include "DEFINES.H"
 #include "../PERSO.H"
 #include "../RETAILFIX.H"
+#include "../SEA_FX.H" /* the open sea in motion: its page, its quads (DRAWSKY.CPP) */
 
 #include <SVGA/SCREEN.H>
+#include <POLYGON/POLYFILT.H> /* PolyTexFilterNZW: the water redraw keeps the texture filter */
 
 #define LIMITE_LOIN (60 * 1024)
 #define COLOR_LIMITE 255
@@ -1107,6 +1109,9 @@ void DrawAnimatedPolys() {
     RepMask = 0xFFFF;
 
     Switch_Fillers(FILL_POLY_FOG_NZW);
+    /* Terrain, which the texture filter covers, through a bank objects in
+       water share and the filter does not cover (POLYFILT.H). */
+    PolyTexFilterNZW = 1;
 
     if (NbToRefresh > RefreshAniPoly)
         NbToRefresh = RefreshAniPoly;
@@ -1132,6 +1137,8 @@ void DrawAnimatedPolys() {
     // protec au cas ou
     if (RefreshAniPoly < 0)
         RefreshAniPoly = 0;
+
+    PolyTexFilterNZW = 0;
 
     // Met a jour Screen pour recouvrements
     BoxBlitStaticListToScreen();

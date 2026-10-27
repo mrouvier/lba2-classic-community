@@ -14,8 +14,13 @@
 #include "MOUSE_CAPTURE.H"   /* MouseConfine */
 #include "RES_SWITCH.H"
 #include "RETAILFIX.H"         /* the retail fixes' settings */
+#include "RAIN_SCALE.H"        /* the storm's scale setting */
+#include "EXTFOV.H"            /* the exterior view's setting */
+#include "RAIN_FX.H"           /* the storm's look */
+#include "SEA_FX.H"            /* the open sea in motion */
 #include <PLATFORM/PLATFORM.H> /* PLATFORM_FILTER_*, and why a mode was refused */
 #include <POLYGON/POLYFILT.H>  /* PolyTexFilter / EnvTexFilter */
+#include <POLYGON/POLYTZF.H>   /* PolyFogDither */
 #include <SVGA/SCREEN.H>
 #include <SYSTEM/KEYBOARD_KEYS.H> /* K_F12, the console toggle default */
 #include <SYSTEM/LOG.H>
@@ -162,6 +167,11 @@ static const T_SETTING BootSettings[] = {
      NULL, SETTING_NOT_RECORDED},
     {"DitherShading", NULL, "gfx_dither", &GfxDitherShading, SETTING_OR_DEFAULT, FALSE, 0, 1, NULL, NULL, NULL, NULL,
      "Ordered dither on Gouraud shade rows (softens 16-step banding)", SETTING_NOT_RECORDED},
+    /* Pixels only: a CLUT row per pixel, no depth written, nothing drawn from
+       the shared random stream, so a recording does not carry it. */
+    {"FogDither", NULL, "gfx_fogdither", &PolyFogDither, SETTING_OR_DEFAULT, FALSE, 0, 1, NULL, NULL, NULL, NULL,
+     "Ordered dither on the fog bands of the sea and the sky (softens the lines between their 16 bands)",
+     SETTING_NOT_RECORDED, SETTING_BEFORE(0)},
     {"TextureFilter", NULL, "gfx_texfilter", &PolyTexFilter, SETTING_OR_DEFAULT, POLY_TEX_FILTER_OFF,
      POLY_TEX_FILTER_OFF, POLY_TEX_FILTER_BILINEAR, &StoredTexFilter, ForcedTexFilter, NULL, &SourceTexFilter,
      "Texture filtering: 0 off, 1 horizontal, 2 bilinear", SETTING_NOT_RECORDED},
@@ -227,9 +237,9 @@ static const T_SETTING GamepadSettings[] = {
 };
 #define GAMEPAD_SETTING_COUNT ((S32)(sizeof(GamepadSettings) / sizeof(GamepadSettings[0])))
 
-/* Every settings table, for whatever has to walk all of them: the recording
- * header today. This file already reads and writes each one, so it is the place
- * that knows the whole set. Returns NULL past the last table. */
+/* Every settings table, for whatever has to walk all of them. This file
+ * already reads and writes each one, so it is the place that knows the whole
+ * set. Returns NULL past the last table. */
 const T_SETTING *ConfigFile_SettingTable(S32 i, S32 *count) {
     switch (i) {
     case 0:
@@ -247,6 +257,14 @@ const T_SETTING *ConfigFile_SettingTable(S32 i, S32 *count) {
         return Audio_Settings(count);
     case 5:
         return RetailFix_Settings(count);
+    case 6:
+        return RainScale_Settings(count);
+    case 7:
+        return ExtFov_Settings(count);
+    case 8:
+        return RainFx_Settings(count);
+    case 9:
+        return SeaFx_Settings(count);
     default:
         *count = 0;
         return NULL;
@@ -389,6 +407,10 @@ void ReadConfigFile(void) {
     Settings_ReadConfig(MouseSettings, MOUSE_SETTING_COUNT);
     FollowCam_ReadConfig();
     RetailFix_ReadConfig();
+    RainScale_ReadConfig();
+    ExtFov_ReadConfig();
+    RainFx_ReadConfig();
+    SeaFx_ReadConfig();
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -466,6 +488,10 @@ void WriteConfigFile(void) {
     Settings_WriteConfig(MouseSettings, MOUSE_SETTING_COUNT);
     FollowCam_WriteConfig();
     RetailFix_WriteConfig();
+    RainScale_WriteConfig();
+    ExtFov_WriteConfig();
+    RainFx_WriteConfig();
+    SeaFx_WriteConfig();
 
     if (batched) {
         DefFileBufferEndBatch();

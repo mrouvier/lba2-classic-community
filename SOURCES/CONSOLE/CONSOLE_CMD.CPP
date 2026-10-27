@@ -12,7 +12,11 @@
 #include "../DISTRIB.H"
 #include "../FOLLOWCAM.H" // cam_* cvars and the camtrace toggle
 #include "../PLAYACF.H"
-#include "../RETAILFIX.H" // fix_* cvars
+#include "../RETAILFIX.H"  // fix_* cvars
+#include "../RAIN_SCALE.H" // gfx_rain_scale
+#include "../EXTFOV.H"     // gfx_fov
+#include "../RAIN_FX.H"    // gfx_rain_fx
+#include "../SEA_FX.H"     // gfx_sea
 #include <POLYGON/POLYFILT.H>
 
 extern S32 GfxDitherShading;
@@ -639,6 +643,18 @@ static void cmd_ui_dispatch(int argc, const char *argv[]) {
                       (int)Menu_CaptureMatchesPresented());
         return;
     }
+    if (argc >= 3 && !strcmp(argv[1], "menu-graphics")) {
+        /* The Graphics submenu, opened from the options menu. Same black-bg
+           convention as `display`. */
+        if (Console_GetCaptureBlackBg()) {
+            memset(Log, 0, (size_t)ModeDesiredX * (size_t)ModeDesiredY);
+            memset(Screen, 0, (size_t)ModeDesiredX * (size_t)ModeDesiredY);
+        }
+        Graphics_MainCapture(argv[2]);
+        Console_Print("ui menu-graphics -> %s (presented_matches_rendered=%d)", argv[2],
+                      (int)Menu_CaptureMatchesPresented());
+        return;
+    }
     if (argc >= 3 && !strcmp(argv[1], "resolution")) {
         /* Resolution sub-page (the list opened from the Display submenu's
            Resolution row). Built at runtime, so Resolution_MainCapture
@@ -820,6 +836,7 @@ static void cmd_ui_dispatch(int argc, const char *argv[]) {
     Console_Print("       ui [--black-bg] dialog <text-id> <path>");
     Console_Print("       ui [--black-bg] menu-options <path>");
     Console_Print("       ui [--black-bg] menu-advanced <path>");
+    Console_Print("       ui [--black-bg] menu-graphics <path>");
     Console_Print("       ui menu-main <path>");
     Console_Print("       ui menu-main-options <path>");
     Console_Print("       ui [--black-bg] display <path>");
@@ -2533,7 +2550,7 @@ void Console_RegisterAll(void) {
                               "Without a path, writes state_<time>.json under shoot/. Diffing two "
                               "dumps from one session says what changed between two moments.");
     Console_RegisterCommandEx("ui", cmd_ui, "Open a UI modal and capture a screenshot",
-                              "ui {inventory|holomap|menu-options|menu-advanced|menu-main|menu-main-options|config|slideshow} <path> | ui config-pad | ui holoplan <island> <path> | ui video <name> <path> | ui {dialog|found-object} <id> <path> | ui pcx-message <pcx-idx> <text-id> [<path>] [big|full|normal] | ui askchoice [--press <key>] <question-id> <choice-id>...",
+                              "ui {inventory|holomap|menu-options|menu-advanced|menu-graphics|menu-main|menu-main-options|config|slideshow} <path> | ui config-pad | ui holoplan <island> <path> | ui video <name> <path> | ui {dialog|found-object} <id> <path> | ui pcx-message <pcx-idx> <text-id> [<path>] [big|full|normal] | ui askchoice [--press <key>] <question-id> <choice-id>...",
                               "Composite verb for UI regression fixtures: opens a UI modal "
                               "with a deterministic auto-exit, writes the settled frame to <path> "
                               "via SavePNG, then closes.  Compose with --load / --exec to drive "
@@ -2690,6 +2707,10 @@ void Console_RegisterAll(void) {
      * registered from their settings tables, with ConfigFile_RegisterCvars. */
     FollowCam_RegisterCvars();
     RetailFix_RegisterCvars();
+    RainScale_RegisterCvars();
+    ExtFov_RegisterCvars();
+    RainFx_RegisterCvars();
+    SeaFx_RegisterCvars();
     ConfigFile_RegisterCvars();
     Audio_RegisterCvars();
 }
