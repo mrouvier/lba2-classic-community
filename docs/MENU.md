@@ -26,7 +26,7 @@ Main Menu
 │   ├── Graphics [custom localized label]
 │   │   ├── Back (26)
 │   │   ├── Texture filter: Off / Horizontal / Bilinear      [custom localized label]
-│   │   ├── Dithering: Off / Shading / Shading and fog       [custom localized label]
+│   │   ├── Dithering: Off / Shading / Shading and fog (Fog, console only) [custom localized label]
 │   │   ├── Scaling: Nearest / Linear / Pixel art            [custom localized label]
 │   │   ├── Rain: Original / Scaled to resolution / Enhanced [custom localized label]
 │   │   └── Exterior view: Original / Keep height            [custom localized label]
@@ -47,7 +47,8 @@ Main Menu
 │   │   ├── Movie camera OFF/ON (46/47)
 │   │   ├── Auto camera / Classic camera [custom localized label, community addition]
 │   │   ├── Small videos / Full screen videos (27/28)
-│   │   └── Don't display text / Display text (16/17)
+│   │   ├── Don't display text / Display text (16/17)
+│   │   └── Fix retail bugs: Yes / No / Custom [custom localized label]
 │   └── Controls [custom localized label]
 │       ├── Back (26)
 │       ├── Keyboard Config (14)
@@ -109,10 +110,10 @@ Flow: `RealGameMainMenu` (template) → `BuildGameMainMenu(firstloop)` → `Game
 
 - **Options** (`OptionsMenu`): top-level submenu for Display, Graphics, Sound volume, Choose language, Advanced options, and Controls. Reuses original `TEXT.HQR` labels where they already exist and keeps custom localized labels for new submenu concepts. Controls groups gameplay keyboard/gamepad remapping. Calls `GereDisplayMenu()`, `GereGraphicsMenu()`, `GereVolumeMenu()`, `GereLanguageMenu()`, `GereAdvancedOptionsMenu()`, and `GereControllerMenu()`. Calls `SetDetailLevel()` on exit.
 - **Display** (`GereDisplayMenu`, `DisplayMenu`): the resolution row opens `GereResolutionMenu`, a page built at run time from the resolution catalog; the Vsync and Fullscreen rows toggle. Fullscreen is the last row, so on always-fullscreen devices the menu drops it by count.
-- **Graphics** (`GereGraphicsMenu`, `GraphicsMenu`): one cycling row per rendering option in [GFX_OPTIONS.md](GFX_OPTIONS.md): texture filter, dithering (one row over two settings, `DitherShading` and `FogDither`: Off, Shading, Shading and fog, `DitherRowCycle`), the filter that scales the frame to the window, the storm (one row over two settings, `RainScale` and `RainFx`: Original, Scaled to resolution, Enhanced, `RainRowCycle`), and the exterior view's vertical lock. Each row finds its `T_SETTING` by its cfg key across the settings tables (`ConfigFile_SettingTable`) and steps it with `Settings_Apply`, so the range, the on-change hook and the "set this run" mark stay in the table that owns the setting, whichever module that is; a Scaling change applies on the frame being shown and the others on the next scene frame, and each persists with the other settings through `WriteConfigFile`. Interior render scaling (`LBA2_ISO_DIV`) has no row: it is read once at startup.
+- **Graphics** (`GereGraphicsMenu`, `GraphicsMenu`): one cycling row per rendering option in [GFX_OPTIONS.md](GFX_OPTIONS.md), the Dithering and Rain rows over two settings each: texture filter, dithering (`DitherShading` and `FogDither`: Off, Shading, Shading and fog, and Fog when only the console set the fog half, `DitherRowCycle`), the filter that scales the frame to the window, the storm (one row over two settings, `RainScale` and `RainFx`: Original, Scaled to resolution, Enhanced, `RainRowCycle`), and the exterior view's vertical lock. Each row finds its `T_SETTING` by its cfg key across the settings tables (`ConfigFile_SettingTable`) and steps it with `Settings_Apply`, so the range, the on-change hook and the "set this run" mark stay in the table that owns the setting, whichever module that is; a Scaling change applies on the frame being shown and the others on the next scene frame, and each persists with the other settings through `WriteConfigFile`. Interior render scaling (`LBA2_ISO_DIV`) has no row: it is read once at startup.
 - **Volume** (`GereVolumeMenu`): `VolumeMenuVoice` / `VolumeMenuNoVoice` depending on `FlagSpeak`. Sliders for Sample, Voice, Music, and General volume. Persisted via [CONFIG.md](CONFIG.md).
 - **Language** (`GereLanguageMenu`): cycles text language and voice language independently. Text changes reload `TEXT.HQR` immediately; voice changes update the active `LanguageCD` setting.
-- **Advanced options** (`GereAdvancedOptionsMenu`): toggles stereo handling, movie cameras, follow camera, video playback size, and subtitle display; includes the existing Detail Level slider. Fullscreen moved to Display.
+- **Advanced options** (`GereAdvancedOptionsMenu`): toggles stereo handling, movie cameras, follow camera, video playback size, and subtitle display, and cycles the Fix retail bugs row ([RETAILFIX.H](../SOURCES/RETAILFIX.H)); includes the existing Detail Level slider. Fullscreen moved to Display.
 - **Save/Load** (`SavedGameManagement`, `ChoosePlayerName`): Player name selection, save slots, `GameChoiceMenu[]`, `SavedConfirmMenu[]` for delete
 - **Controls** (`GereControllerMenu`, `ControllerMenu`): `MenuConfig` and `MenuGamepadConfig` edit gameplay bindings (both in [SOURCES/CONFIG.CPP](../SOURCES/CONFIG.CPP)). The standalone legacy config tool remains in [SOURCES/CONFIG/](../SOURCES/CONFIG/).
 

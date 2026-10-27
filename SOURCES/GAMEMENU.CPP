@@ -185,8 +185,8 @@ U16 DisplayMenu[] = {
 
 // Graphics submenu: the rendering options the settings tables own (the
 // rasterizer and present rows in CONFIG_FILE.CPP, the rain row in
-// RAIN_SCALE.CPP, the exterior view row in EXTFOV.CPP), one cycling row each,
-// the Dithering and Rain rows over two settings each. Every row reads and
+// RAIN_SCALE.CPP and RAIN_FX.CPP, the exterior view row in EXTFOV.CPP), one
+// cycling row each, the Dithering and Rain rows over two settings each. Every row reads and
 // writes its T_SETTING through the table, so the range, the default and the
 // "set this run" mark that keeps a menu choice from being overwritten by a
 // per-run environment override all live in the table and nowhere here. See
@@ -3595,7 +3595,8 @@ S32 GereDisplayMenu(void) {
 }
 
 // Graphics submenu: a self-contained submenu of OptionsMenu, one cycling row
-// per rendering option. The Scaling row applies to the frame being shown; the
+// per rendering option, the Dithering and Rain rows over two settings each.
+// The Scaling row applies to the frame being shown; the
 // rasterizer rows show on the next scene frame, behind the shaded menu; the
 // Rain row on the next storm frame, when GereRain (RAIN.CPP) grows the drop
 // count and AffRain reads the streak width; the Exterior view row sets the

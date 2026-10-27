@@ -247,7 +247,10 @@ const struct MenuLabelRow LocalizedMenuLabels[MENU_LABEL_COUNT] = {
       "Filtro texture: bilineare",
       "Filtro de texturas: bilinear"}},
     /* The Dithering row (POLYGTEX.CPP, POLYTZF.H): one row over the shade
-       rows' dither and the fog bands' dither. */
+       rows' dither and the fog bands' dither. Fog alone shows only when the
+       console sets the fog dither without the shading one. The shading noun
+       is the same in the Shading and the Shading and fog states, so the row
+       never reads as dithering the shadows, which are a setting of their own. */
     {MENU_LABEL_DITHER_OFF,
      {"Dithering: Off",
       "Tramage : non",
@@ -260,15 +263,15 @@ const struct MenuLabelRow LocalizedMenuLabels[MENU_LABEL_COUNT] = {
       "Tramage : ombrage",
       "Dithering: Schattierung",
       "Tramado: sombreado",
-      "Dithering: ombreggiatura",
-      "Pontilhado: sombreamento"}},
+      "Dithering: sfumature",
+      "Pontilhado: sombreado"}},
     {MENU_LABEL_DITHER_SHADING_FOG,
      {"Dithering: Shading and fog",
-      "Tramage : ombres et brouillard",
-      "Dithering: Schatten und Nebel",
+      "Tramage : ombrage, brouillard",
+      "Dithering: Schattierung, Nebel",
       "Tramado: sombreado y niebla",
-      "Dithering: ombre e nebbia",
-      "Pontilhado: sombra e névoa"}},
+      "Dithering: sfumature e nebbia",
+      "Pontilhado: sombreado e névoa"}},
     {MENU_LABEL_DITHER_FOG,
      {"Dithering: Fog",
       "Tramage : brouillard",
