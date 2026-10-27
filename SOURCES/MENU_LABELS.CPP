@@ -281,8 +281,9 @@ const struct MenuLabelRow LocalizedMenuLabels[MENU_LABEL_COUNT] = {
       "Escalado: pixel art",
       "Scaling: pixel art",
       "Escala: pixel art"}},
-    /* The storm's scale row (RAIN_SCALE.H): the 1997 drop count and one-pixel
-       streaks, or both scaled to the framebuffer. */
+    /* The storm's row (RAIN_SCALE.H, RAIN_FX.H): the 1997 drop count and
+       one-pixel streaks, both scaled to the framebuffer, or scaled and drawn as
+       translucent streaks in a gusting wind. */
     {MENU_LABEL_RAIN_ORIGINAL,
      {"Rain: Original",
       "Pluie : d'origine",
@@ -297,6 +298,13 @@ const struct MenuLabelRow LocalizedMenuLabels[MENU_LABEL_COUNT] = {
       "Lluvia: según resolución",
       "Pioggia: adattata allo schermo",
       "Chuva: ajustada à resolução"}},
+    {MENU_LABEL_RAIN_ENHANCED,
+     {"Rain: Enhanced",
+      "Pluie : améliorée",
+      "Regen: verbessert",
+      "Lluvia: mejorada",
+      "Pioggia: migliorata",
+      "Chuva: melhorada"}},
     /* The exterior view row (EXTFOV.H): the fixed focal, or the 1997 vertical
        view kept at any height. */
     {MENU_LABEL_EXTFOV_ORIGINAL,

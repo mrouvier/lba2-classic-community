@@ -46,6 +46,10 @@ void Poly_BuildBlendLUT(const U8 *pal768);
    is off, and a palette load while it is off only records the palette. */
 void Poly_EnsureBlendLUT(void);
 
+/* Build the tables if they are stale, whether or not filtering is on, for a
+   user of the mix other than the fillers (the storm's translucent streaks). */
+void Poly_RequireBlendLUT(void);
+
 /* Blend final palette indices a and b. q is the quantised sub-texel weight
    0..3: 0 selects a untouched, 1..3 select the 25/50/75% table. */
 #define POLY_BLEND(a, b, q) \

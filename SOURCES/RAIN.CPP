@@ -1,5 +1,6 @@
 #include "C_EXTERN.H"
 #include "RAIN_SCALE.H" /* the drop count and streak width for this framebuffer */
+#include "RAIN_FX.H"    /* the look: the streak and the wind */
 
 //----------------------------------------------------------------------------
 #define RAIN_VX 200
@@ -40,6 +41,11 @@ void InitOneRain(T_RAIN *pt) {
     S32 rndy;
     S32 spanxz = RainScale_SpanXZ(30000); /* the box's side, for a view this wide */
 
+    if (RainFx_NearDrop(RainFx, (S32)(pt - TabRain))) {
+        RainFx_InitNear(pt); /* the look's near layer, in front of the camera */
+        return;
+    }
+
     /* The range above the target, VueOffsetY + 10000 in 1997, scaled whole so
        the box's height grows with the frame's at any altitude. */
     rndy = MyRnd(RainScale_SpanY(VueOffsetY + 10000));
@@ -71,7 +77,7 @@ void	RestartOneRain( T_RAIN *pt )
 void InitRain() {
     S32 i;
 
-    NbRain = RainScale_DropCount();
+    NbRain = RainFx_DropCount(RainScale_DropCount());
 
     for (i = 0; i < NbRain; i++) {
         InitOneRain(&TabRain[i]);
@@ -101,7 +107,7 @@ void GereRain() {
     DeltaRain = LastTimer ? (temp - LastTimer) * 10 : 0;
     LastTimer = temp;
 
-    temp = RainScale_DropCount();
+    temp = RainFx_DropCount(RainScale_DropCount());
     for (i = NbRain; i < temp; i++) {
         InitOneRain(&TabRain[i]);
     }
@@ -109,7 +115,7 @@ void GereRain() {
 
     for (i = 0; i < NbRain; i++) {
         if (!TabRain[i].Timer) {
-            TabRain[i].XRain += DeltaRain / 2;
+            TabRain[i].XRain += RainFx_DriftX(DeltaRain);
             TabRain[i].ZRain += DeltaRain / 2;
             TabRain[i].YRain -= DeltaRain;
         }
@@ -126,6 +132,8 @@ void AffRain() {
     UnsetClip();
 
     width = RainScale_StreakWidth();
+    if (RainFx)
+        width = 1; /* the enhanced streak draws its own columns (RAIN_FX.CPP) */
     RainScale_BoxBegin(NbRain, width);
 
     for (i = 0; i < NbRain; i++) {
@@ -161,8 +169,8 @@ void AffRain() {
 
             z = RegleTrois(0, 65535, ClipZFar, z);
 
-            f = LineRain(x, y, z, x0, y0, z, c);
-            f |= LineRain(x, y, z, x1, y0, z, c);
+            f = RainFx_Line(x, y, z, x0, y0, z, c);
+            f |= RainFx_Line(x, y, z, x1, y0, z, c);
 
             if (f & 1) {
                 S32 bx1 = x1, by0 = y0, by1 = y1;
@@ -182,9 +190,9 @@ void AffRain() {
                 RestartOneRain(&TabRain[i]);
             }
 
-            LongWorldRotatePoint(TabRain[i].XRain - RAIN_DELTA_X,
-                                 TabRain[i].YRain + RAIN_DELTA_Y,
-                                 TabRain[i].ZRain - RAIN_DELTA_Z);
+            LongWorldRotatePoint(TabRain[i].XRain - RainFx_DeltaX(RAIN_DELTA_X),
+                                 TabRain[i].YRain + RainFx_DeltaYZ(RAIN_DELTA_Y),
+                                 TabRain[i].ZRain - RainFx_DeltaYZ(RAIN_DELTA_Z));
 
             if (!LongProjectPoint(X0, Y0, Z0)) {
                 continue;
@@ -208,7 +216,7 @@ void AffRain() {
 
             c = BoundRegleTrois(16 * 3 + 10, 16 * 3 + 3, ClipZFar - StartZFog, Z0);
 
-            f = LineRain(xp, yp, z0, Xp, Yp, z1, c);
+            f = RainFx_Line(xp, yp, z0, Xp, Yp, z1, c);
 
             if (f & 1) {
                 S32 bx0 = ScreenXMin, by0 = ScreenYMin, bx1 = ScreenXMax, by1 = ScreenYMax;

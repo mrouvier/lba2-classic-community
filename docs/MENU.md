@@ -28,7 +28,7 @@ Main Menu
 │   │   ├── Texture filter: Off / Horizontal / Bilinear [custom localized label]
 │   │   ├── Dithered shading: Off / On               [custom localized label]
 │   │   ├── Scaling: Nearest / Linear / Pixel art    [custom localized label]
-│   │   ├── Rain: Original / Scaled to resolution    [custom localized label]
+│   │   ├── Rain: Original / Scaled to resolution / Enhanced [custom localized label]
 │   │   └── Exterior view: Original / Keep height    [custom localized label]
 │   ├── Sound volume (11)
 │   │   ├── Back (26)
@@ -109,7 +109,7 @@ Flow: `RealGameMainMenu` (template) → `BuildGameMainMenu(firstloop)` → `Game
 
 - **Options** (`OptionsMenu`): top-level submenu for Display, Graphics, Sound volume, Choose language, Advanced options, and Controls. Reuses original `TEXT.HQR` labels where they already exist and keeps custom localized labels for new submenu concepts. Controls groups gameplay keyboard/gamepad remapping. Calls `GereDisplayMenu()`, `GereGraphicsMenu()`, `GereVolumeMenu()`, `GereLanguageMenu()`, `GereAdvancedOptionsMenu()`, and `GereControllerMenu()`. Calls `SetDetailLevel()` on exit.
 - **Display** (`GereDisplayMenu`, `DisplayMenu`): the resolution row opens `GereResolutionMenu`, a page built at run time from the resolution catalog; the Vsync and Fullscreen rows toggle. Fullscreen is the last row, so on always-fullscreen devices the menu drops it by count.
-- **Graphics** (`GereGraphicsMenu`, `GraphicsMenu`): one cycling row per rendering option in [GFX_OPTIONS.md](GFX_OPTIONS.md): texture filter, dithered shading, the filter that scales the frame to the window, the storm's scale, and the exterior view's vertical lock. Each row finds its `T_SETTING` by its cfg key across the settings tables (`ConfigFile_SettingTable`) and steps it with `Settings_Apply`, so the range, the on-change hook and the "set this run" mark stay in the table that owns the setting, whichever module that is; a change applies on the frame being shown and persists with the other settings through `WriteConfigFile`. Interior render scaling (`LBA2_ISO_DIV`) has no row: it is read once at startup.
+- **Graphics** (`GereGraphicsMenu`, `GraphicsMenu`): one cycling row per rendering option in [GFX_OPTIONS.md](GFX_OPTIONS.md): texture filter, dithered shading, the filter that scales the frame to the window, the storm (one row over two settings, `RainScale` and `RainFx`: Original, Scaled to resolution, Enhanced, `RainRowCycle`), and the exterior view's vertical lock. Each row finds its `T_SETTING` by its cfg key across the settings tables (`ConfigFile_SettingTable`) and steps it with `Settings_Apply`, so the range, the on-change hook and the "set this run" mark stay in the table that owns the setting, whichever module that is; a change applies on the frame being shown and persists with the other settings through `WriteConfigFile`. Interior render scaling (`LBA2_ISO_DIV`) has no row: it is read once at startup.
 - **Volume** (`GereVolumeMenu`): `VolumeMenuVoice` / `VolumeMenuNoVoice` depending on `FlagSpeak`. Sliders for Sample, Voice, Music, and General volume. Persisted via [CONFIG.md](CONFIG.md).
 - **Language** (`GereLanguageMenu`): cycles text language and voice language independently. Text changes reload `TEXT.HQR` immediately; voice changes update the active `LanguageCD` setting.
 - **Advanced options** (`GereAdvancedOptionsMenu`): toggles stereo handling, movie cameras, follow camera, video playback size, and subtitle display; includes the existing Detail Level slider. Fullscreen moved to Display.

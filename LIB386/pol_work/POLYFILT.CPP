@@ -48,12 +48,9 @@ void Poly_BuildBlendLUT(const U8 *pal768) {
     s_tablesBuilt = 0;
 }
 
-void Poly_EnsureBlendLUT(void) {
+static void BuildTables(void) {
     const U8 *pal = s_palette;
     S32 a, b;
-
-    if (PolyTexFilter == POLY_TEX_FILTER_OFF || s_tablesBuilt || !s_paletteValid)
-        return;
 
     /* The diagonal is written first and never searched: a nearest-RGB lookup
        can return a different index that happens to share the colour, and an
@@ -93,4 +90,16 @@ void Poly_EnsureBlendLUT(void) {
     }
 
     s_tablesBuilt = 1;
+}
+
+void Poly_EnsureBlendLUT(void) {
+    if (PolyTexFilter == POLY_TEX_FILTER_OFF || s_tablesBuilt || !s_paletteValid)
+        return;
+    BuildTables();
+}
+
+void Poly_RequireBlendLUT(void) {
+    if (s_tablesBuilt || !s_paletteValid)
+        return;
+    BuildTables();
 }

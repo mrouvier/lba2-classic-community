@@ -4,7 +4,7 @@ Variables and locations that can be changed or exposed as options to improve gra
 
 ## Shipped options
 
-All six are off by default, so a stock run renders exactly as before. Five of them have a row in the Options → Graphics submenu (see [MENU.md](MENU.md)); interior render scaling is read once at startup and stays environment-only. All of them can also be set from the console or the config file.
+All seven are off by default, so a stock run renders exactly as before. Six of them are reachable from the Options → Graphics submenu (see [MENU.md](MENU.md)); interior render scaling is read once at startup and stays environment-only. All of them can also be set from the console or the config file.
 
 | Option | Menu row | Console | lba2.cfg | Environment | Values |
 |--------|----------|---------|----------|-------------|--------|
@@ -13,6 +13,7 @@ All six are off by default, so a stock run renders exactly as before. Five of th
 | Interior render scaling | (none) | (none) | (none) | `LBA2_ISO_DIV` | 1 off, 2 to 4 |
 | Present filter | Scaling | `gfx_presentfilter` | `PresentFilter` | `LBA2_PRESENT_FILTER` | 0 nearest, 1 linear, 2 pixelart |
 | Rain scale | Rain | `gfx_rain_scale` | `RainScale` | (none) | 0 the 1997 storm, 1 scaled to the framebuffer |
+| Rain look | Rain | `gfx_rain_fx` | `RainFx` | (none) | 0 the 1997 look, 1 translucent streaks, wind and a near layer |
 | Exterior view | Exterior view | `gfx_fov` | `ExteriorFov` | (none) | 0 the fixed focal, 1 keep the 1997 vertical view |
 
 **Texture filtering** smooths magnified texels on terrain, sea, and sky. The rasterizer works in palette indices, where averaging two entries is meaningless, so the blend is a precomputed table of the nearest palette index to each 25/50/75% RGB mix. Costs roughly 7% of frame time on terrain and 4% on a sea-heavy view at 1728x1080 with the 4-tap setting.
@@ -59,6 +60,14 @@ gfx_fov 1
 
 ```
 gfx_rain_scale 1
+```
+
+**Rain look** makes the storm read as one. The 1997 storm draws every drop as an opaque one-pixel line of a grey the fog ramp picks by depth, its splash as an opaque V, drifts the drops with one constant wind, and keeps them in a box around the view's target, so the ground in front of the camera sees few of them: the density on screen is the far drops, over the sky. With the setting on ([SOURCES/RAIN_FX.H](../SOURCES/RAIN_FX.H)), each drop is a streak twice the 1997 length with a solid head and a tail blended into what is behind it through the palette mix tables the texture filter uses (`PolyBlendLUT`, built on demand by `Poly_RequireBlendLUT` whether or not the filter is on), a step brighter on its ramp, a column wider and solid near the camera and 75% at most far away; the wind sways by a third over five seconds and gusts to two thirds more every 7.3 seconds, and every streak leans with it; every fourth drop starts between the eye and the view's target, above the view ray and within the view's width there, so the ground is rained on; and the look runs a third more drops than the scale gives, within the pool. The streak keeps `LineRain`'s depth test, its 16-bit wrap included: a depth past the far clip wraps to a near one and the drop is drawn over whatever is there, which is how the 1997 storm's far drops are on screen at all. The Options → Graphics "Rain" row cycles the three looks, Original, Scaled to resolution, Enhanced, over `RainScale` and `RainFx`.
+
+The setting is recorded: the wind moves the drops, the streak decides where a drop meets the ground and the near layer starts drops elsewhere, all of which reach the shared random stream; its wind is integer arithmetic on the game clock, so every platform sways the same. The look's streak is C++ of its own; `LINERAIN.CPP`, the ASM-equivalence-tested line, draws the 1997 look and is untouched.
+
+```
+gfx_rain_scale 1; gfx_rain_fx 1
 ```
 
 ## Ideas not yet wired up

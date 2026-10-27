@@ -463,6 +463,28 @@ static S32 GraphicsSettingValue(const char *key) {
     return (decl != NULL) ? *decl->value : 0;
 }
 
+/* Write a Graphics row's setting through its table, so it is coerced, its
+   owner told and the run marked as having set it. */
+static void GraphicsSettingSet(const char *key, S32 value) {
+    const T_SETTING *decl = GraphicsSetting(key);
+    if (decl != NULL)
+        Settings_Apply(decl, value);
+}
+
+/* The Rain row cycles three looks over two settings: the 1997 storm, the storm
+   scaled to the framebuffer (RAIN_SCALE.H), and that storm drawn as translucent
+   streaks in a gusting wind (RAIN_FX.H). */
+static void RainRowCycle(void) {
+    if (GraphicsSettingValue("RainFx")) {
+        GraphicsSettingSet("RainFx", 0);
+        GraphicsSettingSet("RainScale", 0);
+    } else if (GraphicsSettingValue("RainScale")) {
+        GraphicsSettingSet("RainFx", 1);
+    } else {
+        GraphicsSettingSet("RainScale", 1);
+    }
+}
+
 /* Step a Graphics row to its next value, wrapping at the table's own range,
    through Settings_Apply so the owner is told (the present filter reaches the
    window backend through its on_change hook) and the run is marked as having
@@ -581,8 +603,9 @@ static void BuildCustomMenuText(S32 num, char *string) {
 
     case MENU_ID_RAIN_SCALE:
         CopyUtf8ToCp850(string, 256,
-                        GetLocalizedMenuLabel(GraphicsSettingValue("RainScale") ? MENU_LABEL_RAIN_SCALED
-                                                                                : MENU_LABEL_RAIN_ORIGINAL));
+                        GetLocalizedMenuLabel(GraphicsSettingValue("RainFx")      ? MENU_LABEL_RAIN_ENHANCED
+                                              : GraphicsSettingValue("RainScale") ? MENU_LABEL_RAIN_SCALED
+                                                                                  : MENU_LABEL_RAIN_ORIGINAL));
         break;
 
     case MENU_ID_EXTERIOR_FOV:
@@ -3577,7 +3600,7 @@ S32 GereGraphicsMenu(void) {
             break;
 
         case MENU_ID_RAIN_SCALE:
-            GraphicsSettingCycle("RainScale");
+            RainRowCycle();
             break;
 
         case MENU_ID_EXTERIOR_FOV:
