@@ -521,6 +521,26 @@ static void test_arming_clears_a_pending_overlay(void) {
     ASSERT_EQ_UINT(base + 16, TimerSystemHR);
 }
 
+/* The pacing flag can be read, for the one wait that idles only where wall time is being
+ * spent (the message pause, SOURCES/PERSO.CPP): on between an arm and its clearing, off
+ * under a refusal whatever is asked, and gone with the clock. */
+static void test_pacing_is_readable(void) {
+    Timer_EnableFixedDt(16);
+    ASSERT_EQ_INT(0, Timer_FixedDtPaced());
+    Timer_SetFixedDtPaced(1);
+    ASSERT_EQ_INT(1, Timer_FixedDtPaced());
+    Timer_SetFixedDtPaced(0);
+    ASSERT_EQ_INT(0, Timer_FixedDtPaced());
+    Timer_RefusePacing(1);
+    Timer_SetFixedDtPaced(1);
+    ASSERT_EQ_INT(0, Timer_FixedDtPaced());
+    Timer_RefusePacing(0);
+    Timer_SetFixedDtPaced(1);
+    ASSERT_EQ_INT(1, Timer_FixedDtPaced());
+    Timer_DisableFixedDt();
+    ASSERT_EQ_INT(0, Timer_FixedDtPaced());
+}
+
 int main(void) {
     RUN_TEST(test_step_count_is_pacing_invariant);
     RUN_TEST(test_high_and_low_frame_rate);
@@ -537,6 +557,7 @@ int main(void) {
     RUN_TEST(test_a_clock_wait_with_no_source_cannot_advance);
     RUN_TEST(test_only_the_unpolled_pump_reaches_the_wait_hook);
     RUN_TEST(test_arming_clears_a_pending_overlay);
+    RUN_TEST(test_pacing_is_readable);
     TEST_SUMMARY();
     return test_failures != 0;
 }

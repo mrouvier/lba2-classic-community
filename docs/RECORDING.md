@@ -354,7 +354,11 @@ whether the clock is held to real time or not, which is what makes pacing safe f
 compares per-tick hashes: it spends wall time and changes no value the simulation reads.
 
 Off unless a recording asks for it. A batch run under `--fixed-dt` wants the opposite, and
-outrunning real time is most of why the harness has the flag.
+outrunning real time is most of why the harness has the flag. The P-key pause reads the same
+flag: paced, it sleeps a millisecond per poll (`GamePaused`, [TIMING.md](TIMING.md)), so a
+recorded pause holds about a thousand polls a second rather than the tens of thousands an
+unslept loop writes; a replay never sleeps and drains whatever the file holds, and a batch
+recording under `--no-pace` does not sleep either.
 
 Two things it does not cover. A **replay** is not paced, which is right for verifying a recording
 and wrong for a player watching one back with `rec play`, where it races. And `FadeToBlack` pumps

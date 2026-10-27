@@ -90,6 +90,10 @@ void Timer_FixedDtPumpPolled();
 // too-fast transitions, the menus that scroll several entries a keypress and the dialogue
 // that skips itself. Inert outside fixed-dt. Cleared when the clock is disarmed.
 void Timer_SetFixedDtPaced(S32 on);
+// Whether the pinned clock is held to real time, for a wait that idles only where wall
+// time is being spent: the message pause (GamePaused, SOURCES/PERSO.CPP) sleeps a
+// millisecond a poll on a live clock or a paced pinned one, and not in a batch run.
+S32 Timer_FixedDtPaced(void);
 
 // Refuse the above for the rest of the run: Timer_SetFixedDtPaced(1) then leaves the clock
 // unpaced. For a scripted run that records (--no-pace): nobody is playing, the input comes

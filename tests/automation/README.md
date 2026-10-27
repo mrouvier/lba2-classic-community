@@ -27,7 +27,7 @@ times every fixture, reports the ones over their tier's budget, and keeps the ti
 Attaching the run record to a PR that touches engine behaviour is the cheapest way to show the
 suite still passes, since CI cannot say so.
 
-94 fixtures: 54 small, 29 medium, 11 big.
+95 fixtures: 54 small, 30 medium, 11 big.
 
 | Fixture | Tier | What it pins | Also needs |
 |---|---|---|---|
@@ -88,6 +88,7 @@ suite still passes, since CI cannot say so.
 | [test_negative.sh](test_negative.sh) | small | Robustness: a bad --load path must fail gracefully (clean exit + message), not hang or crash. | - |
 | [test_pad_bindings.sh](test_pad_bindings.sh) | medium | The gamepad's binding table resolves to the same actions the keyboard's does. | - |
 | [test_pad_config_columns.sh](test_pad_config_columns.sh) | medium | The keyboard reaches both binding columns of the Game Controller screen. | - |
+| [test_pause_idle.sh](test_pause_idle.sh) | medium | The P-key pause sleeps a millisecond per poll where wall time is being spent, and never under a replay or an unpaced pinned clock. | save fixture |
 | [test_polyrec.sh](test_polyrec.sh) | small | --polyrec: trigger the existing polygon draw-call recorder at a scripted --load/--tick state (instead of the manual Alt+F9). | save fixture |
 | [test_profile_bind.sh](test_profile_bind.sh) | small | A named profile binds to one install, and moving it has to say so. | - |
 | [test_projection_corpus.sh](test_projection_corpus.sh) | medium | projection corpus: capture the per-save projection-pipeline FNV-1a digest for every committed save in tests/savegame/corpus/, byte-compare to the committed golden. | - |
