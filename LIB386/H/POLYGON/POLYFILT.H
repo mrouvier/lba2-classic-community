@@ -30,6 +30,17 @@ extern "C" {
 
 extern S32 PolyTexFilter; /* one of POLY_TEX_FILTER_* */
 
+/* Whether the fog no-Z-write bank (FILL_POLY_FOG_NZW) filters. It draws the
+   terrain's animated water, redrawn a quarter at a time after the frame that
+   drew it through the Z-buffered fillers (DrawAnimatedPolys,
+   SOURCES/3DEXT/TERRAIN.CPP), and objects: exterior ones in water or on the
+   buggy (OBJECT.CPP) and the end credits' (CREDITS.CPP). The redraw sets this
+   around its polygons, so the water keeps the filtering the frame drew it with
+   and the objects drawn through the bank stay as they were. Read by the
+   no-Z-write fillers whose Z-buffered twins filter: textured fog and textured
+   Gouraud, and their chroma-key forms. */
+extern S32 PolyTexFilterNZW;
+
 /* Indexed [level][a<<8 | b]. POLY_BLEND below takes a *weight* 0..3 rather than
    a level: weight 0 means "pure a" and so has no table of its own, which is why
    the macro indexes with weight-1. */
@@ -45,6 +56,10 @@ void Poly_BuildBlendLUT(const U8 *pal768);
    turning the filter on at runtime work: the tables are not built while it
    is off, and a palette load while it is off only records the palette. */
 void Poly_EnsureBlendLUT(void);
+
+/* Build the tables if they are stale, whether or not filtering is on, for a
+   user of the mix other than the fillers (the storm's translucent streaks). */
+void Poly_RequireBlendLUT(void);
 
 /* Blend final palette indices a and b. q is the quantised sub-texel weight
    0..3: 0 selects a untouched, 1..3 select the 25/50/75% table. */

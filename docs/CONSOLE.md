@@ -110,6 +110,10 @@ Get/set with `varname` (print value) or `varname value` (set).
 | **fix_retail** | int | Fix retail bugs: 0 no (the original's rules), 1 yes, 2 custom (each `fix_` setting decides). The Options → Advanced options row. See [CONFIG.md](CONFIG.md#retail-fixes). |
 | **fix_found_obj_walk** | bool | Retail fix: a direction held through a found-item popup still moves Twinsen afterwards. Setting it switches `fix_retail` to 2. |
 | **fix_terrain_seams** | bool | Retail fix: hairline seams show between the cubes of the outdoor ground. On, the terrain, sea and sky draw on the 1997 integer path. Setting it switches `fix_retail` to 2. |
+| **gfx_fogdither** | bool | Fog: 0 the sea's and the sky's 16 fog bands with hard lines between them, 1 an ordered dither centred on each band, so the lines become gradients. The fog half of the Options → Graphics "Dithering" row: its Shading and fog state with `gfx_dither 1`, Fog without it, a state only the console sets, which the row's next press turns off with the shading. See [GFX_OPTIONS.md](GFX_OPTIONS.md). |
+| **gfx_rain_scale** | bool | Rain: 0 the 1997 storm (200 drops one pixel wide), 1 its density and streak width on this framebuffer. The Options → Graphics "Rain" row. See [GFX_OPTIONS.md](GFX_OPTIONS.md). |
+| **gfx_rain_fx** | bool | Rain: 0 the 1997 look (opaque one-pixel lines), 1 translucent depth-graded streaks, a gusting wind and a near layer in front of the camera. The Options → Graphics "Rain" row's Enhanced state. See [GFX_OPTIONS.md](GFX_OPTIONS.md). |
+| **gfx_fov** | bool | Exterior view: 0 the fixed focal (a taller frame shows more world), 1 keep the 1997 vertical view (detail grows with the height). Sets the projection again in an exterior. The Options → Graphics "Exterior view" row. See [GFX_OPTIONS.md](GFX_OPTIONS.md). |
 
 ## Layout
 
