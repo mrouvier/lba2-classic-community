@@ -269,11 +269,24 @@ seam (original, currently hidden by 4:3 framing).
 4. **Constrain offered resolutions.** Derive height from width at a fixed aspect so
    HD means "wider, not taller." Sidesteps the issue with almost no rendering work,
    but isn't true native tall-HD.
+5. **Scale the focal with the height.** `ChampX`/`ChampZ` become `600 × h / 480`,
+   so the vertical FOV is the original's at any height and only the horizontal grows
+   with the aspect; detail grows with the resolution instead of the view. **Shipped
+   as an opt-in**, `ExteriorFov` / `gfx_fov` / the Graphics menu's "Exterior view"
+   row ([GFX_OPTIONS.md](GFX_OPTIONS.md), `SOURCES/EXTFOV.H`), after #734. With it
+   on, the near clip returns to its original value, the Auto camera's HD recompose
+   (option 2's shipped half) stands down, and the classic camera's off-screen
+   margins follow the focal. It never reveals the sky edge, and it keeps the full
+   frame for 3D, at the cost of the extra vertical world a taller frame could show.
+   Sprites follow the focal (`CalculeScaleFactorSprite`); particle dots, text and
+   the HUD, drawn in pixels, do not.
 
 **Leaning:** recompose rather than crop or reveal — keep the widescreen horizontal
 FOV, and treat the extra vertical with a modest aspect-proportional `VueDistance`
 adjustment (option 2) where it's safe, falling back to the letterbox cap (option 1)
 where per-scene clipping/readability makes zooming in untenable. The two blend.
+Option 5 is the third answer, and the one a player can switch on today; whether it
+becomes the default is the open decision.
 Decide the actual HD target first (specifically 16:9 1080p vs arbitrary tall
 windows) — it bounds how much vertical reveal we ever have to handle. Cheap to
 evaluate empirically: A/B Desert Island at 1920×1024 across a few `VueDistance`

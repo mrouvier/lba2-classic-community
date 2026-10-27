@@ -5,7 +5,7 @@ description: The exterior camera has two owners, a world yaw everything renders 
 status: draft
 subsystem: camera
 as_of: 372f920f
-generated: { by: claude-code/claude-opus-5-5, at: 2026-10-14T14:00:00Z }
+generated: { by: claude-code/claude-fable-5-1, at: 2026-10-27T10:00:00Z }
 relates_to:
   - /subsystems/transitions.md
   - /subsystems/input.md
@@ -76,7 +76,7 @@ Distilled from [docs/CAMERA_INTERNALS.md](../../CAMERA_INTERNALS.md), which stay
 
 - **That the classic camera is being kept as it was by accident.** It is the reference: every Auto camera behaviour is measured against it or against the Auto camera with the switch off, and a change that moves the classic camera is a regression.
 - **That a green CI covers the camera.** CI runs the arithmetic in `FOLLOWCAM_MATH.H` and a source check on the setting rows, and nothing else; the behavioural fixtures need retail data and a display and run locally only. Reasons and habits are in [the camera tests Reference](/references/camera-tests.md).[^testing][^math]
-- **That a measurement at one resolution holds at another.** The HD recompose is a no-op at 480 lines, so a change measured there has not met the correction, and one measured only at 1080 has not met the original framing.
+- **That a measurement at one resolution holds at another.** The HD recompose is a no-op at 480 lines, and at any height under the exterior view lock (`ExteriorFov`), which keeps the view 480 lines tall, so a change measured there has not met the correction, and one measured only at 1080 with the lock off has not met the original framing.
 - **Where a zone's index points.** The GOG and US disc data differ in the flags of three camera zones, two in cube 42; a zone named by cube and index has to be checked against the data being played.
 - **What the 2022 Classic release does in a case nobody ported.** Its behaviours were read from the executable and emulated, not played side by side; what came in is what was ported, and "as retail does" in a comment names one behaviour, not the release.
 
