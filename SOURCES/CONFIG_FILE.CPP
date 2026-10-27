@@ -19,6 +19,7 @@
 #include "RAIN_FX.H"           /* the storm's look */
 #include <PLATFORM/PLATFORM.H> /* PLATFORM_FILTER_*, and why a mode was refused */
 #include <POLYGON/POLYFILT.H>  /* PolyTexFilter / EnvTexFilter */
+#include <POLYGON/POLYTZF.H>   /* PolyFogDither */
 #include <SVGA/SCREEN.H>
 #include <SYSTEM/KEYBOARD_KEYS.H> /* K_F12, the console toggle default */
 #include <SYSTEM/LOG.H>
@@ -165,6 +166,11 @@ static const T_SETTING BootSettings[] = {
      NULL, SETTING_NOT_RECORDED},
     {"DitherShading", NULL, "gfx_dither", &GfxDitherShading, SETTING_OR_DEFAULT, FALSE, 0, 1, NULL, NULL, NULL, NULL,
      "Ordered dither on Gouraud shade rows (softens 16-step banding)", SETTING_NOT_RECORDED},
+    /* Pixels only: a CLUT row per pixel, no depth written, nothing drawn from
+       the shared random stream, so a recording does not carry it. */
+    {"FogDither", NULL, "gfx_fogdither", &PolyFogDither, SETTING_OR_DEFAULT, FALSE, 0, 1, NULL, NULL, NULL, NULL,
+     "Ordered dither on the fog bands of the sea and the sky (softens the lines between their 16 bands)",
+     SETTING_NOT_RECORDED, SETTING_BEFORE(0)},
     {"TextureFilter", NULL, "gfx_texfilter", &PolyTexFilter, SETTING_OR_DEFAULT, POLY_TEX_FILTER_OFF,
      POLY_TEX_FILTER_OFF, POLY_TEX_FILTER_BILINEAR, &StoredTexFilter, ForcedTexFilter, NULL, &SourceTexFilter,
      "Texture filtering: 0 off, 1 horizontal, 2 bilinear", SETTING_NOT_RECORDED},

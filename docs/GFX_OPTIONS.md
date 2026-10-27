@@ -4,21 +4,24 @@ Variables and locations that can be changed or exposed as options to improve gra
 
 ## Shipped options
 
-All seven are off by default, so a stock run renders exactly as before. Six of them are reachable from the Options → Graphics submenu (see [MENU.md](MENU.md)); interior render scaling is read once at startup and stays environment-only. All of them can also be set from the console or the config file.
+All eight are off by default, so a stock run renders exactly as before. Seven of them are reachable from the Options → Graphics submenu (see [MENU.md](MENU.md)) and can also be set from the console or the config file; interior render scaling is read once at startup and stays environment-only.
 
 | Option | Menu row | Console | lba2.cfg | Environment | Values |
 |--------|----------|---------|----------|-------------|--------|
 | Texture filtering | Texture filter | `gfx_texfilter` | `TextureFilter` | `LBA2_TEXFILTER` | 0 off, 1 horizontal 2-tap, 2 bilinear 4-tap |
-| Dithered shading | Dithered shading | `gfx_dither` | `DitherShading` | (none) | 0 off, 1 on |
+| Dithered shading | Dithering | `gfx_dither` | `DitherShading` | (none) | 0 off, 1 on |
+| Dithered fog | Dithering | `gfx_fogdither` | `FogDither` | (none) | 0 off, 1 on |
 | Interior render scaling | (none) | (none) | (none) | `LBA2_ISO_DIV` | 1 off, 2 to 4 |
 | Present filter | Scaling | `gfx_presentfilter` | `PresentFilter` | `LBA2_PRESENT_FILTER` | 0 nearest, 1 linear, 2 pixelart |
 | Rain scale | Rain | `gfx_rain_scale` | `RainScale` | (none) | 0 the 1997 storm, 1 scaled to the framebuffer |
 | Rain look | Rain | `gfx_rain_fx` | `RainFx` | (none) | 0 the 1997 look, 1 translucent streaks, wind and a near layer |
 | Exterior view | Exterior view | `gfx_fov` | `ExteriorFov` | (none) | 0 the fixed focal, 1 keep the 1997 vertical view |
 
-**Texture filtering** smooths magnified texels on terrain, sea, and sky. The rasterizer works in palette indices, where averaging two entries is meaningless, so the blend is a precomputed table of the nearest palette index to each 25/50/75% RGB mix. Costs roughly 7% of frame time on terrain and 4% on a sea-heavy view at 1728x1080 with the 4-tap setting.
+**Texture filtering** smooths magnified texels on terrain, sea, and sky. The rasterizer works in palette indices, where averaging two entries is meaningless, so the blend is a precomputed table of the nearest palette index to each 25/50/75% RGB mix. Costs roughly 7% of frame time on terrain and 4% on a sea-heavy view at 1728x1080 with the 4-tap setting. The animated water a cube carries (the shallows around the lighthouse islet, say) is drawn with the rest of the terrain and then redrawn a quarter at a time through the fillers that test the depth without writing it, which objects in water, on the buggy and in the end credits share; those filter while the water is being redrawn and not otherwise (`PolyTexFilterNZW`, [POLYFILT.H](../LIB386/H/POLYGON/POLYFILT.H)), so the water keeps its filtering after the frame that drew it and the objects drawn through them stay unfiltered.
 
 **Dithered shading** applies an ordered dither to Gouraud shade rows, which softens the 16-step banding of the original palette ramps.
+
+**Dithered fog** does the same for the fog on the sea and the sky. Those two take their fog band from the depth as they draw, once a 32-pixel span, sixteen bands between `StartZFog` and the far clip, and a flat sea seen from above crosses the bands' edges as hard horizontal lines a few shades apart. The filler that draws them (`Filler_TextureZFogSmoothZBuf`, [POLYTZF.CPP](../LIB386/pol_work/POLYTZF.CPP); its two siblings for the same polygon type dither the same way) keeps the four bits under the band, how far into it the span is, and picks each pixel's band from them through the 4x4 ordered threshold of the shading dither (`PolyTZF_FogDitherRow`, [POLYTZF.H](../LIB386/H/POLYGON/POLYTZF.H)). The dither is centred on the band: a span in the middle of its band draws the original's band, one on an edge is half each band, so each line becomes a gradient and the sea keeps its tone. The depth is the same along a row for the sea and the sky whenever the camera has no roll, which is the game's camera except where a camera zone sets one (`GammaCam`); there the per-span band shows as 32-pixel steps in the gradient. The land's fog is picked once a polygon and is not dithered. Pixels only: the setting writes no depth and draws nothing from the shared random stream, so recordings do not carry it. The Options → Graphics "Dithering" row cycles Off, Shading and Shading and fog over the two dithers.
 
 **Interior render scaling** renders isometric interiors at 1/N of the chosen resolution and lets the present stretch them back, so the room is drawn larger. Nothing in an interior scales with the framebuffer (bricks are pre-rendered sprites and the iso projectors take no focal argument), so a bigger framebuffer otherwise just reveals more empty space around the room: it covers 29% of the frame at 1728x1080 against 82% at 640x480. Exteriors, whose projection does carry a focal, always render at full resolution.
 

@@ -4,6 +4,7 @@
 #include <string.h>
 
 S32 PolyTexFilter = POLY_TEX_FILTER_OFF;
+S32 PolyTexFilterNZW = 0;
 U8 PolyBlendLUT[3][65536];
 
 static U8 s_palette[768];

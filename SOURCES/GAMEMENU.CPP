@@ -185,10 +185,12 @@ U16 DisplayMenu[] = {
 
 // Graphics submenu: the rendering options the settings tables own (the
 // rasterizer and present rows in CONFIG_FILE.CPP, the rain row in
-// RAIN_SCALE.CPP, the exterior view row in EXTFOV.CPP), one cycling row each. Every row reads and writes its
-// T_SETTING through the table, so the range, the default and the "set this run"
-// mark that keeps a menu choice from being overwritten by a per-run environment
-// override all live in the table and nowhere here. See GereGraphicsMenu.
+// RAIN_SCALE.CPP, the exterior view row in EXTFOV.CPP), one cycling row each,
+// the Dithering and Rain rows over two settings each. Every row reads and
+// writes its T_SETTING through the table, so the range, the default and the
+// "set this run" mark that keeps a menu choice from being overwritten by a
+// per-run environment override all live in the table and nowhere here. See
+// GereGraphicsMenu.
 U16 GraphicsMenu[] = {
     0,   // selected
     6,   // nb entries
@@ -485,6 +487,20 @@ static void RainRowCycle(void) {
     }
 }
 
+/* The Dithering row cycles three states over two settings: none, the Gouraud
+   shade rows (POLYGTEX.CPP), and those and the sea's and the sky's fog bands
+   (POLYTZF.H). The fog alone, which only the console sets, goes back to none. */
+static void DitherRowCycle(void) {
+    if (GraphicsSettingValue("FogDither")) {
+        GraphicsSettingSet("FogDither", 0);
+        GraphicsSettingSet("DitherShading", 0);
+    } else if (GraphicsSettingValue("DitherShading")) {
+        GraphicsSettingSet("FogDither", 1);
+    } else {
+        GraphicsSettingSet("DitherShading", 1);
+    }
+}
+
 /* Step a Graphics row to its next value, wrapping at the table's own range,
    through Settings_Apply so the owner is told (the present filter reaches the
    window backend through its on_change hook) and the run is marked as having
@@ -586,11 +602,14 @@ static void BuildCustomMenuText(S32 num, char *string) {
         break;
     }
 
-    case MENU_ID_DITHER_SHADING:
+    case MENU_ID_DITHER_SHADING: {
+        const S32 shading = GraphicsSettingValue("DitherShading");
+        const S32 fog = GraphicsSettingValue("FogDither");
         CopyUtf8ToCp850(string, 256,
-                        GetLocalizedMenuLabel(GraphicsSettingValue("DitherShading") ? MENU_LABEL_DITHER_ON
-                                                                                    : MENU_LABEL_DITHER_OFF));
+                        GetLocalizedMenuLabel(fog ? (shading ? MENU_LABEL_DITHER_SHADING_FOG : MENU_LABEL_DITHER_FOG)
+                                                  : (shading ? MENU_LABEL_DITHER_SHADING : MENU_LABEL_DITHER_OFF)));
         break;
+    }
 
     case MENU_ID_PRESENT_FILTER: {
         const S32 v = GraphicsSettingValue("PresentFilter");
@@ -3392,6 +3411,22 @@ void Advanced_MainCapture(const char *path) {
     Menu_RequestCapture(NULL);
 }
 
+// Harness one-shot capture of the Graphics submenu, the same way.
+void Graphics_MainCapture(const char *path) {
+    HQ_StopSample();
+    InitPlasmaMenu();
+
+    CopyScreen(Screen, Log);
+    BoxStaticFullflip();
+    PtrPal = PtrPalNormal;
+    PaletteSync(PtrPalNormal);
+    InitDial(0);
+
+    Menu_RequestCapture(path);
+    DoGameMenu(GraphicsMenu);
+    Menu_RequestCapture(NULL);
+}
+
 // Harness one-shot capture of the resolution sub-page. Same shape as
 // Display_MainCapture but builds the runtime ResolutionMenu first (the page is
 // generated, not a static array), then drives DoGameMenu(ResolutionMenu) with
@@ -3592,7 +3627,7 @@ S32 GereGraphicsMenu(void) {
             break;
 
         case MENU_ID_DITHER_SHADING:
-            GraphicsSettingCycle("DitherShading");
+            DitherRowCycle();
             break;
 
         case MENU_ID_PRESENT_FILTER:
