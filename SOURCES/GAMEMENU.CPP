@@ -106,6 +106,7 @@ S32 FlagShowEndDemo = FALSE;
 #define MENU_ID_PRESENT_FILTER 2121
 #define MENU_ID_RAIN_SCALE 2122
 #define MENU_ID_EXTERIOR_FOV 2123
+#define MENU_ID_SEA 2124
 
 // Resolution sub-page rows occupy a reserved id range: row i carries id
 // MENU_ID_RESOLUTION_BASE + i, which BuildCustomMenuText and GereResolutionMenu
@@ -185,15 +186,15 @@ U16 DisplayMenu[] = {
 
 // Graphics submenu: the rendering options the settings tables own (the
 // rasterizer and present rows in CONFIG_FILE.CPP, the rain row in
-// RAIN_SCALE.CPP and RAIN_FX.CPP, the exterior view row in EXTFOV.CPP), one
-// cycling row each, the Dithering and Rain rows over two settings each. Every row reads and
-// writes its T_SETTING through the table, so the range, the default and the
-// "set this run" mark that keeps a menu choice from being overwritten by a
-// per-run environment override all live in the table and nowhere here. See
-// GereGraphicsMenu.
+// RAIN_SCALE.CPP and RAIN_FX.CPP, the sea row in SEA_FX.CPP, the exterior view
+// row in EXTFOV.CPP), one cycling row each, the Dithering and Rain rows over
+// two settings each. Every row reads and writes its T_SETTING through the
+// table, so the range, the default and the "set this run" mark that keeps a
+// menu choice from being overwritten by a per-run environment override all
+// live in the table and nowhere here. See GereGraphicsMenu.
 U16 GraphicsMenu[] = {
     0,   // selected
-    6,   // nb entries
+    7,   // nb entries
     260, // y center
     0,   // .dia num
 
@@ -207,6 +208,8 @@ U16 GraphicsMenu[] = {
     MENU_ID_PRESENT_FILTER,
     0,
     MENU_ID_RAIN_SCALE,
+    0,
+    MENU_ID_SEA,
     0,
     MENU_ID_EXTERIOR_FOV,
 };
@@ -626,6 +629,15 @@ static void BuildCustomMenuText(S32 num, char *string) {
                                               : GraphicsSettingValue("RainScale") ? MENU_LABEL_RAIN_SCALED
                                                                                   : MENU_LABEL_RAIN_ORIGINAL));
         break;
+
+    case MENU_ID_SEA: {
+        const S32 v = GraphicsSettingValue("SeaMotion");
+        CopyUtf8ToCp850(string, 256,
+                        GetLocalizedMenuLabel(v >= 2 ? MENU_LABEL_SEA_CHOPPY
+                                              : v    ? MENU_LABEL_SEA_MOVING
+                                                     : MENU_LABEL_SEA_ORIGINAL));
+        break;
+    }
 
     case MENU_ID_EXTERIOR_FOV:
         CopyUtf8ToCp850(string, 256,
@@ -3601,7 +3613,7 @@ S32 GereDisplayMenu(void) {
 // Rain row on the next storm frame, when GereRain (RAIN.CPP) grows the drop
 // count and AffRain reads the streak width; the Exterior view row sets the
 // projection again as it changes (EXTFOV.CPP) and shows on the next scene
-// frame. All persist with the rest of the settings through WriteConfigFile, as
+// frame; the Sea row redraws the scene whole (SEA_FX.CPP). All persist with the rest of the settings through WriteConfigFile, as
 // the Display rows do.
 S32 GereGraphicsMenu(void) {
     S32 select;
@@ -3637,6 +3649,10 @@ S32 GereGraphicsMenu(void) {
 
         case MENU_ID_RAIN_SCALE:
             RainRowCycle();
+            break;
+
+        case MENU_ID_SEA:
+            GraphicsSettingCycle("SeaMotion");
             break;
 
         case MENU_ID_EXTERIOR_FOV:

@@ -33,12 +33,14 @@ extern S32 PolyTexFilter; /* one of POLY_TEX_FILTER_* */
 /* Whether the fog no-Z-write bank (FILL_POLY_FOG_NZW) filters. It draws the
    terrain's animated water, redrawn a quarter at a time after the frame that
    drew it through the Z-buffered fillers (DrawAnimatedPolys,
-   SOURCES/3DEXT/TERRAIN.CPP), and objects: exterior ones in water or on the
-   buggy (OBJECT.CPP) and the end credits' (CREDITS.CPP). The redraw sets this
-   around its polygons, so the water keeps the filtering the frame drew it with
-   and the objects drawn through the bank stay as they were. Read by the
-   no-Z-write fillers whose Z-buffered twins filter: textured fog and textured
-   Gouraud, and their chroma-key forms. */
+   SOURCES/3DEXT/TERRAIN.CPP), the open sea refilled between full redraws
+   (SeaFx_Refill, SOURCES/SEA_FX.CPP), and objects: exterior ones in water or
+   on the buggy (OBJECT.CPP) and the end credits' (CREDITS.CPP). The redraws
+   set this around their polygons, so the water keeps the filtering the frame
+   drew it with and the objects drawn through the bank stay as they were. Read
+   by the no-Z-write fillers whose Z-buffered twins filter: textured fog and
+   textured Gouraud, their chroma-key forms, and the perspective fog filler
+   the sea and the sky are drawn with. */
 extern S32 PolyTexFilterNZW;
 
 /* Indexed [level][a<<8 | b]. POLY_BLEND below takes a *weight* 0..3 rather than

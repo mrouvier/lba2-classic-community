@@ -6,6 +6,7 @@
 #include "FOLLOWCAM.H" /* FollowCamera: camera zones re-aim the Auto camera */
 #include "RECORD.H"    /* Record_SeedHook: the boot scene load's seed on a replay */
 #include "SAVEGAME.H"
+#include "SEA_FX.H"    /* the open sea refilled between full redraws */
 #include "ZONE_GEOM.H" // ZonePointInBox -- single source of truth for the zone box test
 
 #include <SYSTEM/LOG.H> // cubetrace
@@ -5025,6 +5026,7 @@ S32 AffOneObject(T_SORT *pt) {
                 if ((ptrobj->Flags & OBJ_BACKGROUND)
                         AND((FlagFlip == AFF_ALL_FLIP)
                                 OR(FlagFlip == AFF_ALL_NO_FLIP))) {
+                    SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                     CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                               ClipXMin, ClipYMin, Screen);
                 }
@@ -5151,6 +5153,7 @@ S32 AffOneObject(T_SORT *pt) {
             if ((ptrobj->Flags & OBJ_BACKGROUND)
                     AND((FlagFlip == AFF_ALL_FLIP)
                             OR(FlagFlip == AFF_ALL_NO_FLIP))) {
+                SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                           ClipXMin, ClipYMin, Screen);
             }
@@ -5237,6 +5240,7 @@ S32 AffOneObject(T_SORT *pt) {
             if ((ptrobj->Flags & OBJ_BACKGROUND)
                     AND((FlagFlip == AFF_ALL_FLIP)
                             OR(FlagFlip == AFF_ALL_NO_FLIP))) {
+                SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                           ClipXMin, ClipYMin, Screen);
             }
@@ -5480,8 +5484,10 @@ startaffscene:
         BoxClean(); // ATTENTION: rajouté le 30/05/97
         if (!FlagAnimWhoSpeak) {
             RestoreCinemaMode(); // Scrolle les bandes noires
-            if (CubeMode == CUBE_EXTERIEUR)
+            if (CubeMode == CUBE_EXTERIEUR) {
+                SeaFx_Refill();
                 DrawAnimatedPolys();
+            }
         }
         break;
 

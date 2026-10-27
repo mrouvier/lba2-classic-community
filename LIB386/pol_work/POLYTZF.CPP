@@ -565,6 +565,8 @@ S32 Filler_TextureZFogSmoothNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
     S32 v = Fill_CurMapVMin;
     S32 w = Fill_CurWMin;
     U32 patch = Fill_Patch - 1;
+    /* The sea's refill filters here, objects do not (POLYFILT.H). */
+    const S32 filter = PolyTexFilterNZW ? PolyTexFilter : POLY_TEX_FILTER_OFF;
 
     static U32 NZW_RepMaskPatch;
     static PTR_U8 NZW_PtrMapPatch;
@@ -684,7 +686,28 @@ S32 Filler_TextureZFogSmoothNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
                             U32 mapIndex = (V_int << 8) | U_int;
                             mapIndex &= NZW_RepMaskPatch;
                             U8 texel = NZW_PtrMapPatch[mapIndex];
-                            NZW_PtrLog[pixOfs] = NZW_PtrCLUT[fogRow + texel];
+                            U8 outIdx = NZW_PtrCLUT[fogRow + texel];
+                            if (filter != POLY_TEX_FILTER_OFF) {
+                                /* As Filler_TextureZFogSmoothZBuf: each tap
+                                   through the CLUT on the pixel's fog row, then
+                                   blended. */
+                                const U32 uNext = (U_int + 1) & 0xFF;
+                                const U32 qu = (uvCur & 0xFF) >> 6;
+                                const U32 iU = ((V_int << 8) | uNext) & NZW_RepMaskPatch;
+                                const U8 bU = NZW_PtrCLUT[fogRow + NZW_PtrMapPatch[iU]];
+                                outIdx = POLY_BLEND(outIdx, bU, qu);
+                                if (filter == POLY_TEX_FILTER_BILINEAR) {
+                                    const U32 vNext = (V_int + 1) & 0xFF;
+                                    const U32 iV = ((vNext << 8) | U_int) & NZW_RepMaskPatch;
+                                    const U32 iUV = ((vNext << 8) | uNext) & NZW_RepMaskPatch;
+                                    const U8 aV = NZW_PtrCLUT[fogRow + NZW_PtrMapPatch[iV]];
+                                    const U8 bV = NZW_PtrCLUT[fogRow + NZW_PtrMapPatch[iUV]];
+                                    const U8 lower = POLY_BLEND(aV, bV, qu);
+                                    const U32 qv = ((uvCur >> 16) & 0xFF) >> 6;
+                                    outIdx = POLY_BLEND(outIdx, lower, qv);
+                                }
+                            }
+                            NZW_PtrLog[pixOfs] = outIdx;
                         }
 
                         uvCur += uvInc;
@@ -709,7 +732,29 @@ S32 Filler_TextureZFogSmoothNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
                             U32 mapIndex = (V_int << 8) | U_int;
                             mapIndex &= NZW_RepMaskPatch;
                             U8 texel = NZW_PtrMapPatch[mapIndex];
-                            NZW_PtrLog[pixOfs] = NZW_PtrCLUT[rows[(col + px) & 3] + texel];
+                            const U32 row = rows[(col + px) & 3];
+                            U8 outIdx = NZW_PtrCLUT[row + texel];
+                            if (filter != POLY_TEX_FILTER_OFF) {
+                                /* As Filler_TextureZFogSmoothZBuf: each tap
+                                   through the CLUT on the pixel's fog row, then
+                                   blended. */
+                                const U32 uNext = (U_int + 1) & 0xFF;
+                                const U32 qu = (uvCur & 0xFF) >> 6;
+                                const U32 iU = ((V_int << 8) | uNext) & NZW_RepMaskPatch;
+                                const U8 bU = NZW_PtrCLUT[row + NZW_PtrMapPatch[iU]];
+                                outIdx = POLY_BLEND(outIdx, bU, qu);
+                                if (filter == POLY_TEX_FILTER_BILINEAR) {
+                                    const U32 vNext = (V_int + 1) & 0xFF;
+                                    const U32 iV = ((vNext << 8) | U_int) & NZW_RepMaskPatch;
+                                    const U32 iUV = ((vNext << 8) | uNext) & NZW_RepMaskPatch;
+                                    const U8 aV = NZW_PtrCLUT[row + NZW_PtrMapPatch[iV]];
+                                    const U8 bV = NZW_PtrCLUT[row + NZW_PtrMapPatch[iUV]];
+                                    const U8 lower = POLY_BLEND(aV, bV, qu);
+                                    const U32 qv = ((uvCur >> 16) & 0xFF) >> 6;
+                                    outIdx = POLY_BLEND(outIdx, lower, qv);
+                                }
+                            }
+                            NZW_PtrLog[pixOfs] = outIdx;
                         }
 
                         uvCur += uvInc;

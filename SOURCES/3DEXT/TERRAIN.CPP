@@ -1,6 +1,7 @@
 #include "DEFINES.H"
 #include "../PERSO.H"
 #include "../RETAILFIX.H"
+#include "../SEA_FX.H" /* the open sea in motion: its page, its quads (DRAWSKY.CPP) */
 
 #include <SVGA/SCREEN.H>
 #include <POLYGON/POLYFILT.H> /* PolyTexFilterNZW: the water redraw keeps the texture filter */

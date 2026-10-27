@@ -17,6 +17,7 @@
 #include "RAIN_SCALE.H"        /* the storm's scale setting */
 #include "EXTFOV.H"            /* the exterior view's setting */
 #include "RAIN_FX.H"           /* the storm's look */
+#include "SEA_FX.H"            /* the open sea in motion */
 #include <PLATFORM/PLATFORM.H> /* PLATFORM_FILTER_*, and why a mode was refused */
 #include <POLYGON/POLYFILT.H>  /* PolyTexFilter / EnvTexFilter */
 #include <POLYGON/POLYTZF.H>   /* PolyFogDither */
@@ -262,6 +263,8 @@ const T_SETTING *ConfigFile_SettingTable(S32 i, S32 *count) {
         return ExtFov_Settings(count);
     case 8:
         return RainFx_Settings(count);
+    case 9:
+        return SeaFx_Settings(count);
     default:
         *count = 0;
         return NULL;
@@ -407,6 +410,7 @@ void ReadConfigFile(void) {
     RainScale_ReadConfig();
     ExtFov_ReadConfig();
     RainFx_ReadConfig();
+    SeaFx_ReadConfig();
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -487,6 +491,7 @@ void WriteConfigFile(void) {
     RainScale_WriteConfig();
     ExtFov_WriteConfig();
     RainFx_WriteConfig();
+    SeaFx_WriteConfig();
 
     if (batched) {
         DefFileBufferEndBatch();

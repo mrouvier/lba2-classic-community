@@ -558,7 +558,7 @@ widescreen, font, palette, or layout changes are most likely to disturb.
 | `ui dialog <text-id> <path>` | The dialogue bubble + portrait + typewriter text for that text-id |
 | `ui menu-options <path>` | The in-game ESC menu (Volume / Language / Advanced / Controls) over the shaded scene |
 | `ui menu-advanced <path>` | The Advanced options page (camera, movies, text, Fix retail bugs) |
-| `ui menu-graphics <path>` | The Graphics submenu (texture filter, dithering, scaling, rain, exterior view) |
+| `ui menu-graphics <path>` | The Graphics submenu (texture filter, dithering, scaling, rain, sea, exterior view) |
 | `ui menu-main <path>` | The boot-time main menu (Resume / New Game / Load / Options / Quit) |
 | `ui menu-main-options <path>` | Options entered from the boot main menu |
 | `ui found-object <numvar> <path>` | The found-object cinematic — 3D rotation of `TabInv[numvar]`'s item + dialogue |

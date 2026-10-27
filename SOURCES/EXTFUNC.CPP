@@ -8,6 +8,7 @@
  *══════════════════════════════════════════════════════════════════════════*/
 
 #include "C_EXTERN.H"
+#include "SEA_FX.H" /* SeaFx_FrameBegin: the sea kept from each full redraw */
 #include "DIRECTORIES.H"
 #include "INPUT.H"
 
@@ -319,6 +320,7 @@ void AffGrilleExt() {
     Switch_Fillers(FILL_POLY_FOG_ZBUFFER);
 
     ClearAniPoly();
+    SeaFx_FrameBegin();
 
     ClsTerrainZBuf();
 
