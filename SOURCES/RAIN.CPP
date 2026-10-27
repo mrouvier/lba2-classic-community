@@ -39,9 +39,10 @@ S32 KeepImpactRain = FALSE;
 void InitOneRain(T_RAIN *pt) {
     S32 rndy;
     S32 spanxz = RainScale_SpanXZ(30000); /* the box's side, for a view this wide */
-    S32 spany = RainScale_SpanY(10000);   /* and its height */
 
-    rndy = MyRnd(VueOffsetY + spany);
+    /* The range above the target, VueOffsetY + 10000 in 1997, scaled whole so
+       the box's height grows with the frame's at any altitude. */
+    rndy = MyRnd(RainScale_SpanY(VueOffsetY + 10000));
 
     pt->YRain = VueOffsetY + rndy;
 
@@ -125,7 +126,7 @@ void AffRain() {
     UnsetClip();
 
     width = RainScale_StreakWidth();
-    RainScale_BoxBegin();
+    RainScale_BoxBegin(NbRain, width);
 
     for (i = 0; i < NbRain; i++) {
         if (TabRain[i].Timer) {

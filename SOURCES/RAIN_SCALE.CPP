@@ -12,7 +12,8 @@ S32 RainScale = 0;
 
 static const T_SETTING RainScaleSettings[] = {
     /* Recorded: every drop takes three values from the shared random stream when
-       it starts and whenever AffRain restarts it, so the count is game state.
+       it starts and whenever AffRain or ClearImpactRain restarts it, so the
+       count is game state.
        Added after the header carried every row, so a recording without it
        predates the setting and replays with the 1997 storm. */
     {"RainScale", NULL, "gfx_rain_scale", &RainScale, SETTING_TRUTHY, 0, 0, 1, NULL, NULL, NULL, NULL,
@@ -71,14 +72,12 @@ void RainScale_DrawColumns(S32 x0, S32 y0, S32 z0, S32 x1, S32 y1, S32 z1, S32 c
     }
 }
 
-/* Whether this frame's boxes are unioned: only when the storm differs from the
-   1997 one, so a run the setting changes nothing for keeps the list it had. */
 static S32 s_coalesce = 0;
 static S32 s_boxUsed = 0;
 static S32 s_boxX0, s_boxY0, s_boxX1, s_boxY1;
 
-void RainScale_BoxBegin(void) {
-    s_coalesce = (RainScale_DropCount() != RAIN_DROPS) || (RainScale_StreakWidth() != 1);
+void RainScale_BoxBegin(S32 nbRain, S32 width) {
+    s_coalesce = RainScale_Coalesce(nbRain, width);
     s_boxUsed = 0;
 }
 

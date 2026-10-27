@@ -46,7 +46,7 @@
 // A Reajuster !!!!!!!!!!!!!!!!!!
 //
 
-#define	MAX_RAIN	4050	// TabRain: the 200 drops of 1997 scaled to the largest framebuffer, RAIN_POOL in RAIN_SCALE.H (RAIN.CPP holds the two equal)
+#define	MAX_RAIN	1350	// TabRain: the 200 drops of 1997 scaled by the largest framebuffer's area, RAIN_POOL in RAIN_SCALE.H (RAIN.CPP holds the two equal)
 #define	RAIN_BOXES	200	// one dirty box per 1997 drop; a scaled storm adds one box a frame (RAIN_SCALE.CPP)
 #define	MAX_BOXES	(MAX_OBJETS+MAX_FLOWS+MAX_EXTRAS+MAX_DARTS+RAIN_BOXES)
 

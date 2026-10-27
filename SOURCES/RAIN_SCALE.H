@@ -16,30 +16,35 @@ struct T_SETTING; /* SETTINGS.H; a pointer to a table needs no more */
  * over more pixels. At 1920x1080 the Citadel storm is the same 200 hairlines
  * in 6.75 times the area.
  *
- * RainScale keeps the 1997 look instead. On, the box grows with the view (its
- * sides with the width over 640, its height with the height over 480), the drop
- * count grows with the box so the drops stay as dense in the world, and a streak
- * is as many columns wide as one pixel of a 480-line frame is tall. Off, the
- * default, is byte-identical to the original.
+ * RainScale sizes the storm for the frame instead. On, the box grows with the
+ * view (its sides with the width over 640, its height with the height over
+ * 480) so the frame's edges and upper rows see drops, the drop count follows
+ * the frame's area over 640x480, which holds the streaks per pixel near the
+ * 1997 ones, and a streak is as many columns wide as one pixel of a 480-line
+ * frame is tall. Off, the default, is byte-identical to the original.
  *
  * Recorded: every drop takes three values from the shared random stream when it
- * starts and whenever AffRain or GereRain restarts it (InitOneRain), so the
- * count is game state, and with the setting on it follows the resolution the
- * recording header already carries as `mode.resolution`. */
+ * starts (InitRain, or GereRain for a drop the count gains) and whenever AffRain
+ * or ClearImpactRain restarts it (InitOneRain), so the count is game state, and
+ * with the setting on it follows the resolution the recording header already
+ * compares as `mode.resolution`. */
 
 #define RAIN_DROPS 200 /* the 1997 count, for a 640x480 frame */
 #define RAIN_BASE_W 640
 #define RAIN_BASE_H 480
 
-/* The drop count for a w x h frame: RAIN_DROPS times the box's growth, (w/640)
- * squared for its two sides and h/480 for its height, rounded to nearest. A
- * macro so the pool below is a compile-time size. Plain int, factored so the
- * largest term is (RAIN_DROPS * w / 640) * w * h: 1.25e9 at RES_MAX_W x
- * RES_MAX_H, inside S32. RAIN_POOL is an array size in RAIN.CPP, so a ceiling
- * past what fits fails to compile rather than wrapping. */
-#define RAIN_SCALE_COUNT(w, h)                                                                              \
-    ((((RAIN_DROPS * (w) + RAIN_BASE_W / 2) / RAIN_BASE_W) * (w) * (h) + (RAIN_BASE_W * RAIN_BASE_H) / 2) / \
-     (RAIN_BASE_W * RAIN_BASE_H))
+/* The drop count for a w x h frame: RAIN_DROPS times the frame's area over
+ * 640x480, rounded to nearest. The box grows by (w/640) squared times h/480, so
+ * the world density falls as the box deepens along every ray of the fixed-focal
+ * view; counting by the box's volume instead would put several times the 1997
+ * streaks on each pixel, where counting by area holds them within 1.2x at the
+ * 530 camera preset and at 848x480, and within 1.5x at the 300 preset at 1080
+ * lines, by a model of that view (not measured on retail data). A macro so the
+ * pool below is a compile-time size. Plain int: RAIN_DROPS * w * h is 4.1e8 at
+ * RES_MAX_W x RES_MAX_H, inside S32, and RAIN.CPP holds RAIN_POOL equal to
+ * COMMON.H's MAX_RAIN, TabRain's size, so a value that wrapped would refuse to
+ * build rather than undersize the pool. */
+#define RAIN_SCALE_COUNT(w, h) ((RAIN_DROPS * (w) * (h) + (RAIN_BASE_W * RAIN_BASE_H) / 2) / (RAIN_BASE_W * RAIN_BASE_H))
 
 /* The pool: the count of the largest framebuffer the engine accepts, so no
  * resolution the player can pick is clamped. COMMON.H's MAX_RAIN, which sizes
@@ -75,6 +80,13 @@ static inline S32 RainScale_Span(S32 scale, S32 span, S32 size, S32 base) {
     return span * size / base;
 }
 
+/* Whether a frame's dirty boxes are unioned (RainScale_BoxBegin): only when the
+ * storm being drawn differs from the 1997 one, so a run the setting changes
+ * nothing for keeps the list it had. */
+static inline S32 RainScale_Coalesce(S32 nbRain, S32 width) {
+    return (nbRain != RAIN_DROPS) || (width != 1);
+}
+
 /* How many columns wide a streak is on an h-line frame: one per 480 lines,
  * rounded to nearest, never fewer than one. */
 static inline S32 RainScale_Width(S32 scale, S32 h) {
@@ -103,12 +115,15 @@ extern S32 RainScale_SpanY(S32 span);
 extern void RainScale_DrawColumns(S32 x0, S32 y0, S32 z0, S32 x1, S32 y1, S32 z1, S32 c, S32 width, S32 *by0,
                                   S32 *bx1, S32 *by1);
 
-/* The storm's dirty boxes, one frame at a time: Begin before the drops, Add in
- * place of BoxMovingAdd for each, Flush after. The 1997 storm goes straight to
- * the list, a box per drop; a scaled storm is unioned into one box added by
- * Flush, because the list walks itself on every add and a storm of thousands
- * cannot afford that. The rain covers the frame either way. */
-extern void RainScale_BoxBegin(void);
+/* The storm's dirty boxes, one frame at a time: Begin before the drops, with
+ * the count the caller loops over and the width it draws (the storm being
+ * drawn, which can differ from the setting on a frame drawn without a
+ * simulation step), Add in place of BoxMovingAdd for each, Flush after. The
+ * 1997 storm goes straight to the list, a box per drop; a scaled storm is
+ * unioned into one box added by Flush, because the list walks itself on every
+ * add and a storm of thousands cannot afford that. The rain covers the frame
+ * either way. */
+extern void RainScale_BoxBegin(S32 nbRain, S32 width);
 extern void RainScale_BoxAdd(S32 x0, S32 y0, S32 x1, S32 y1);
 extern void RainScale_BoxFlush(void);
 
