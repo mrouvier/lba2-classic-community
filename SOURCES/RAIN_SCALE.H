@@ -107,6 +107,10 @@ extern S32 RainScale_StreakWidth(void);
 extern S32 RainScale_SpanXZ(S32 span);
 extern S32 RainScale_SpanY(S32 span);
 
+/* The view's width in 480-line pixels, from the resolution the player chose,
+ * for whatever else sizes itself to the storm's frame (the look's near layer). */
+extern S32 RainScale_ViewWidth(void);
+
 /* A streak again one column to the right, (width - 1) times, so a drop on a
  * tall framebuffer is as thick as one pixel was on 480 lines. The caller draws
  * the first column itself, keeps its flags, and calls this only when it showed,

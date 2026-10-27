@@ -25,11 +25,11 @@ Main Menu
 │   │   └── Fullscreen / Windowed [custom localized label, hidden on always-fullscreen devices]
 │   ├── Graphics [custom localized label]
 │   │   ├── Back (26)
-│   │   ├── Texture filter: Off / Horizontal / Bilinear [custom localized label]
-│   │   ├── Dithered shading: Off / On               [custom localized label]
-│   │   ├── Scaling: Nearest / Linear / Pixel art    [custom localized label]
+│   │   ├── Texture filter: Off / Horizontal / Bilinear      [custom localized label]
+│   │   ├── Dithered shading: Off / On                       [custom localized label]
+│   │   ├── Scaling: Nearest / Linear / Pixel art            [custom localized label]
 │   │   ├── Rain: Original / Scaled to resolution / Enhanced [custom localized label]
-│   │   └── Exterior view: Original / Keep height    [custom localized label]
+│   │   └── Exterior view: Original / Keep height            [custom localized label]
 │   ├── Sound volume (11)
 │   │   ├── Back (26)
 │   │   ├── Samples (19)       [slider]

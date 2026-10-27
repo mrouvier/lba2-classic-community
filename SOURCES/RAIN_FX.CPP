@@ -1,7 +1,6 @@
 #include "RAIN_FX.H"
-#include "C_EXTERN.H"   /* VueOffsetX/Y/Z, the view's target; Rnd */
-#include "EXTFOV.H"     /* ExtFov_ViewWidth: how wide the view is, in 480-line pixels */
-#include "RAIN_SCALE.H" /* RainScale_StreakWidth and RAIN_POOL */
+#include "C_EXTERN.H"   /* VueOffsetX/Y/Z, the view's target; MyRnd */
+#include "RAIN_SCALE.H" /* RainScale_StreakWidth, RainScale_ViewWidth, RAIN_POOL */
 #include "SETTINGS.H"
 #include "3DEXT/EXTERN.H" /* LineRain */
 
@@ -18,12 +17,20 @@
 
 S32 RainFx = 0;
 
+/* The streaks blend through the texture filter's tables: built when the look
+   is switched on rather than in the first rainy frame, where it is a hitch.
+   RainFx_Line still asks for them, for a palette set after the switch. */
+static void RainFx_Changed(S32 value) {
+    if (value)
+        Poly_RequireBlendLUT();
+}
+
 static const T_SETTING RainFxSettings[] = {
     /* Recorded: the wind moves the drops and the streak decides where a drop
        meets the ground, both of which reach the shared random stream. Added
        after the header carried every row, so a recording without it predates
        the setting and replays with the 1997 look. */
-    {"RainFx", NULL, "gfx_rain_fx", &RainFx, SETTING_TRUTHY, 0, 0, 1, NULL, NULL, NULL, NULL,
+    {"RainFx", NULL, "gfx_rain_fx", &RainFx, SETTING_TRUTHY, 0, 0, 1, NULL, NULL, RainFx_Changed, NULL,
      "Rain: 0 the 1997 look (opaque one-pixel lines), 1 translucent depth-graded streaks and a gusting wind",
      SETTING_RECORDED, SETTING_BEFORE(0), SETTING_ABSENT_BEFORE},
 };
@@ -44,8 +51,10 @@ void RainFx_Lightning(void) {
     s_lastFlash = TimerRefHR ? TimerRefHR : 1;
 }
 
+/* The clock is read only with the look on: off, the frame's drift is the 1997
+   half of the delta and the streak its 1997 length, nothing of the wind. */
 S32 RainFx_DriftX(S32 delta) {
-    return RainFx_Drift(RainFx, delta, WindNow());
+    return RainFx ? RainFx_Drift(RainFx, delta, WindNow()) : RainFx_Drift(0, delta, 0);
 }
 
 S32 RainFx_DropCount(S32 count) {
@@ -53,7 +62,7 @@ S32 RainFx_DropCount(S32 count) {
 }
 
 S32 RainFx_DeltaX(S32 dx) {
-    return RainFx_StreakX(RainFx, dx, WindNow());
+    return RainFx ? RainFx_StreakX(RainFx, dx, WindNow()) : RainFx_StreakX(0, dx, 0);
 }
 
 S32 RainFx_DeltaYZ(S32 d) {
@@ -64,7 +73,7 @@ void RainFx_InitNear(T_RAIN *pt) {
     const S32 dx = VueOffsetX - CameraX, dy = VueOffsetY - CameraY, dz = VueOffsetZ - CameraZ;
     const S32 dist = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) + (dz < 0 ? -dz : dz);
     const S32 u = 15 + MyRnd(50); /* hundredths of the way from the eye to the target */
-    const S32 lat = RainFx_NearHalfWidth(dist * u / 100, ExtFov_ViewWidth(ExteriorFov, (S32)ModeDesiredX, (S32)ModeDesiredY));
+    const S32 lat = RainFx_NearHalfWidth(dist * u / 100, RainScale_ViewWidth());
     S32 x = CameraX + dx * u / 100;
     S32 y = CameraY + dy * u / 100;
     S32 z = CameraZ + dz * u / 100;
@@ -138,6 +147,24 @@ static S32 ClipSegment(S32 *x0, S32 *y0, S32 *z0, S32 *x1, S32 *y1, S32 *z1) {
         *y0 += (S32)(((S64)dy * t0 + 32768) >> 16);
         *z0 += (S32)(((S64)dz * t0 + 32768) >> 16);
     }
+    /* The 16.16 parameters are exact to the pixel below 32768 pixels of
+       length; the clamp keeps a longer segment's ends in the window too. */
+    if (*x0 < ClipXMin)
+        *x0 = ClipXMin;
+    else if (*x0 > ClipXMax)
+        *x0 = ClipXMax;
+    if (*y0 < ClipYMin)
+        *y0 = ClipYMin;
+    else if (*y0 > ClipYMax)
+        *y0 = ClipYMax;
+    if (*x1 < ClipXMin)
+        *x1 = ClipXMin;
+    else if (*x1 > ClipXMax)
+        *x1 = ClipXMax;
+    if (*y1 < ClipYMin)
+        *y1 = ClipYMin;
+    else if (*y1 > ClipYMax)
+        *y1 = ClipYMax;
     return 1;
 }
 
@@ -157,13 +184,13 @@ static S32 Streak(S32 x0, S32 y0, S32 z0, S32 x1, S32 y1, S32 z1, S32 c) {
     cap = RainFx_Strength((z0 + z1) / 2);
     width = RainScale_StreakWidth() + RainFx_ExtraWidth((z0 + z1) / 2);
 
-    /* LineRain shifts each depth into the high half of a 32-bit register, so a
-       depth past the far clip (AffRain scales it past 65535) wraps to a near one
-       and the drop is drawn over whatever is there. The 1997 storm's far drops
-       are on screen through that, so the streak keeps the wrap, after the
-       strength and width above took the depth as it is. */
-    z0 &= 0xFFFF;
-    z1 &= 0xFFFF;
+    /* The ramp as LineRain carries it (RainFx_DepthStart / DepthDelta): the
+       1997 storm's far drops are on screen through the wrap, and a streak
+       straddling the far clip ramps as the ASM's does. Taken after the
+       strength and width above measured the depth as it is. */
+    dz = RainFx_DepthDelta(z0, z1);
+    z0 = RainFx_DepthStart(z0);
+    z1 = z0 + dz;
 
     if (!ClipSegment(&x0, &y0, &z0, &x1, &y1, &z1)) {
         ScreenXMin = bx0;
@@ -181,9 +208,9 @@ static S32 Streak(S32 x0, S32 y0, S32 z0, S32 x1, S32 y1, S32 z1, S32 c) {
         steps = (dy < 0 ? -dy : dy);
 
     for (i = 0; i <= steps; i++) {
-        const S32 x = steps ? x0 + (S32)(((S64)dx * i * 2 + steps) / (2 * steps)) : x0;
-        const S32 y = steps ? y0 + (S32)(((S64)dy * i * 2 + steps) / (2 * steps)) : y0;
-        const S32 z = steps ? z0 + (S32)(((S64)dz * i * 2 + steps) / (2 * steps)) : z0;
+        const S32 x = steps ? x0 + RainFx_Dda(dx, i, steps) : x0;
+        const S32 y = steps ? y0 + RainFx_Dda(dy, i, steps) : y0;
+        const S32 z = steps ? z0 + RainFx_Dda(dz, i, steps) : z0;
         const U32 row = PTR_TabOffLine[y];
         const S32 q = RainFx_PixelStrength(i, steps, cap);
         S32 k;

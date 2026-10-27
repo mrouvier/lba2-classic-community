@@ -131,9 +131,7 @@ void AffRain() {
 
     UnsetClip();
 
-    width = RainScale_StreakWidth();
-    if (RainFx)
-        width = 1; /* the enhanced streak draws its own columns (RAIN_FX.CPP) */
+    width = RainFx_ColumnWidth(RainFx, RainScale_StreakWidth());
     RainScale_BoxBegin(NbRain, width);
 
     for (i = 0; i < NbRain; i++) {
@@ -173,7 +171,7 @@ void AffRain() {
             f |= RainFx_Line(x, y, z, x1, y0, z, c);
 
             if (f & 1) {
-                S32 bx0 = x0, bx1 = x1, by0 = y0, by1 = y1;
+                S32 bx0 = x0, bx1 = RainFx_SplashRight(RainFx, x1, RainScale_StreakWidth(), z), by0 = y0, by1 = y1;
 
                 RainScale_DrawColumns(x, y, z, x0, y0, z, c, width, &by0, &bx1, &by1);
                 RainScale_DrawColumns(x, y, z, x1, y0, z, c, width, &by0, &bx1, &by1);

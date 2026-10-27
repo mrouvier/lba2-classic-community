@@ -16,7 +16,7 @@ struct T_SETTING; /* SETTINGS.H; a pointer to a table needs no more */
  * storm's density on screen is its far drops, over the sky. RainFx draws the
  * same drops as translucent streaks instead, blended into what is behind them
  * through the palette mix tables the texture filter uses (PolyBlendLUT),
- * longer, stronger and wider near the camera and fainter far away, lets the
+ * twice as long, and stronger and wider near the camera than far away, lets the
  * wind sway and gust, and starts every fourth drop between the eye and the
  * target, above the view ray, so the ground is rained on too. Off, the
  * default, is byte-identical to the original.
@@ -65,7 +65,7 @@ static inline S32 RainFx_Intensity(S32 t, S32 flashAge) {
     if (u < 0)
         u += 45000;
     v = (u < 22500) ? u : 45000 - u; /* 0..22500, a triangle over the cycle */
-    lull = 85 * v / 22500;            /* 0 at full strength, 85 at the lull's bottom */
+    lull = 85 * v / 22500;           /* 0 at full strength, 85 at the lull's bottom */
     burst = (flashAge >= 0 && flashAge < 1500) ? (85 * flashAge / 750) * (1500 - flashAge) / 750 : 0;
     return 256 - lull + burst;
 }
@@ -94,8 +94,8 @@ static inline S32 RainFx_PixelStrength(S32 i, S32 steps, S32 cap) {
     return (q > cap) ? cap : q;
 }
 
-/* The streak's grey, a step up its ramp from the fog's pick, so the blend has
- * something to show: the mix pulls it back toward the ground. Stays inside
+/* The streak's grey, three steps up its ramp from the fog's pick, so the blend
+ * has something to show: the mix pulls it back toward the ground. Stays inside
  * the 16-entry ramp the index is in. */
 static inline S32 RainFx_Brighten(S32 c) {
     const S32 top = (c & ~15) + 15;
@@ -118,6 +118,42 @@ static inline S32 RainFx_ExtraWidth(S32 z) {
     return (z < 12000) ? 1 : 0;
 }
 
+/* The columns RAIN.CPP draws itself beside each line: none with the look on,
+ * whose streak draws its own. */
+static inline S32 RainFx_ColumnWidth(S32 fx, S32 width) {
+    return fx ? 1 : width;
+}
+
+/* The splash box's right edge for an arm ending at x1 at scaled depth z: the
+ * 1997 edge, or that plus the columns the streak adds. */
+static inline S32 RainFx_SplashRight(S32 fx, S32 x1, S32 streakWidth, S32 z) {
+    return fx ? x1 + streakWidth + RainFx_ExtraWidth(z) - 1 : x1;
+}
+
+/* The depth ramp of a streak, as LineRain carries it: each depth is shifted
+ * into the high half of a 32-bit register, so a depth past the far clip
+ * (AffRain scales it past 65535) wraps to a near one, and the difference the
+ * ramp steps by is the sign-extended 16-bit one, carried without wrapping
+ * again. The start is the wrapped depth; the end, start plus that difference,
+ * may run past 65535 or below 0, and the depth test runs in 32 bits there. */
+static inline S32 RainFx_DepthStart(S32 z0) {
+    return z0 & 0xFFFF;
+}
+
+static inline S32 RainFx_DepthDelta(S32 z0, S32 z1) {
+    return (S32)(S16)(U16)((z1 - z0) & 0xFFFF);
+}
+
+/* The offset of step i of `steps` along an axis of delta d, rounded to the
+ * nearest pixel by the magnitude, so a line and its mirror draw the same
+ * pixels and both reach their end: C division truncates toward zero, which on
+ * a negative delta repeats the first pixel and never draws the last. */
+static inline S32 RainFx_Dda(S32 d, S32 i, S32 steps) {
+    const S32 a = d < 0 ? -d : d;
+    const S32 v = (S32)(((S64)a * i * 2 + steps) / (2 * steps));
+    return d < 0 ? -v : v;
+}
+
 /* The ripple's half width at age dt (ms), from the splash's half width xp:
  * the V's width, growing to three times it over the splash's life. */
 static inline S32 RainFx_RippleRadius(S32 xp, S32 dt) {
@@ -131,8 +167,10 @@ static inline S32 RainFx_NearDrop(S32 fx, S32 index) {
 }
 
 /* The drops the look runs: a third more than the storm's scale gives, scaled
- * by the intensity (1/256), within the pool, so the near layer adds to the
- * storm rather than thinning its far veil. Off, the count as it is. */
+ * by the intensity (1/256), within the pool, so the near layer, a quarter of
+ * the run, adds to the storm; past the pool's cap (a scaled count over 1012,
+ * frames above about 1.55 Mpx) it is taken from the far veil instead. Off, the
+ * count as it is. */
 static inline S32 RainFx_Count(S32 fx, S32 count, S32 intensity, S32 pool) {
     S32 n;
     if (!fx)
@@ -160,10 +198,11 @@ extern S32 RainFx_DropCount(S32 count);
  * LM_ECLAIR, the lightning spell): the look gusts and bursts after it. */
 extern void RainFx_Lightning(void);
 
-/* Start a near drop: between the eye and the view's target, a fifth to two
- * thirds of the way, within the view's width there, and above the view ray so
- * it falls across it. Three draws from the shared random stream, as
- * InitOneRain takes. */
+/* Start a near drop: between the eye and the view's target, 15% to 64% of the
+ * way, within the view's width there, and above the view ray so it falls
+ * across it. Four draws from the shared random stream, one more than
+ * InitOneRain takes: how far along the view, two for the lateral offset, one
+ * for the height. */
 extern void RainFx_InitNear(T_RAIN *pt);
 
 /* The streak's world deltas from the drop (AffRain): the 1997 ones as they

@@ -66,7 +66,7 @@ static void test_the_streak_is_soft_at_the_tail(void) {
     ASSERT_EQ_INT(4, RainFx_PixelStrength(0, 0, 4)); /* a one-pixel streak is its head */
 }
 
-/* The streak's grey steps up its ramp and stops at the ramp's top. */
+/* The streak's grey steps three entries up its ramp and stops at the ramp's top. */
 static void test_the_streak_is_brightened_within_its_ramp(void) {
     ASSERT_EQ_INT(54, RainFx_Brighten(51));
     ASSERT_EQ_INT(61, RainFx_Brighten(58));
@@ -128,6 +128,41 @@ static void test_lightning_gusts_and_the_storm_lulls(void) {
     ASSERT_EQ_INT(RainFx_Intensity(1234, -1), RainFx_Intensity(1234 - 45000, -1));
 }
 
+/* The depth ramp is LineRain's: a wrapped start and a sign-extended 16-bit
+ * step, so a streak straddling the far clip ramps past 65535 or below 0 and
+ * stays hidden by everything but the sky, as the ASM's does. */
+static void test_the_depth_ramp_is_the_asm_ones(void) {
+    ASSERT_EQ_INT(65400, RainFx_DepthStart(65400));
+    ASSERT_EQ_INT(164, RainFx_DepthStart(65700));
+    ASSERT_EQ_INT(300, RainFx_DepthDelta(65400, 65700));
+    ASSERT_EQ_INT(65700, RainFx_DepthStart(65400) + RainFx_DepthDelta(65400, 65700));
+    ASSERT_EQ_INT(-546, RainFx_DepthDelta(10, 65000));
+    ASSERT_EQ_INT(-6000, RainFx_DepthDelta(66000, 60000));
+    ASSERT_EQ_INT(100, RainFx_DepthDelta(100, 200));
+}
+
+/* A line and its mirror draw the same pixels and both reach their end. */
+static void test_the_dda_is_symmetric(void) {
+    ASSERT_EQ_INT(30, RainFx_Dda(30, 30, 30));
+    ASSERT_EQ_INT(-30, RainFx_Dda(-30, 30, 30));
+    ASSERT_EQ_INT(1, RainFx_Dda(30, 1, 30));
+    ASSERT_EQ_INT(-1, RainFx_Dda(-30, 1, 30));
+    ASSERT_EQ_INT(0, RainFx_Dda(-7, 0, 30));
+    ASSERT_EQ_INT(-7, RainFx_Dda(-7, 30, 30));
+    ASSERT_EQ_INT(2, RainFx_Dda(7, 10, 30)); /* 2.33 */
+    ASSERT_EQ_INT(-2, RainFx_Dda(-7, 10, 30));
+}
+
+/* With the look on RAIN.CPP draws no columns of its own, and a splash box
+ * reaches the columns the streak adds past the V's right arm. */
+static void test_the_look_owns_the_columns(void) {
+    ASSERT_EQ_INT(2, RainFx_ColumnWidth(0, 2));
+    ASSERT_EQ_INT(1, RainFx_ColumnWidth(1, 2));
+    ASSERT_EQ_INT(100, RainFx_SplashRight(0, 100, 2, 0));
+    ASSERT_EQ_INT(102, RainFx_SplashRight(1, 100, 2, 0));     /* near: 2 + 1 columns */
+    ASSERT_EQ_INT(101, RainFx_SplashRight(1, 100, 2, 30000)); /* far: 2 columns */
+}
+
 int main(void) {
     RUN_TEST(test_off_is_the_1997_drift);
     RUN_TEST(test_the_wind_scales_the_drift);
@@ -141,6 +176,9 @@ int main(void) {
     RUN_TEST(test_the_near_layer_is_as_wide_as_the_view);
     RUN_TEST(test_the_ripple_grows_with_the_splash);
     RUN_TEST(test_lightning_gusts_and_the_storm_lulls);
+    RUN_TEST(test_the_depth_ramp_is_the_asm_ones);
+    RUN_TEST(test_the_dda_is_symmetric);
+    RUN_TEST(test_the_look_owns_the_columns);
     TEST_SUMMARY();
     return test_failures != 0;
 }

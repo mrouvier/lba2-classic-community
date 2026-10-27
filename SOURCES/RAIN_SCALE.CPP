@@ -68,6 +68,12 @@ S32 RainScale_SpanY(S32 span) {
     return RainScale_Span(RainScale, span, h, RAIN_BASE_H);
 }
 
+S32 RainScale_ViewWidth(void) {
+    S32 w, h;
+    ViewFrame(&w, &h);
+    return w;
+}
+
 void RainScale_DrawColumns(S32 x0, S32 y0, S32 z0, S32 x1, S32 y1, S32 z1, S32 c, S32 width, S32 *by0, S32 *bx1,
                            S32 *by1) {
     S32 k;
