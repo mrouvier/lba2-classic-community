@@ -271,6 +271,10 @@ void Timer_SetFixedDtPaced(S32 on) {
     PaceSteps = 0;
 }
 
+S32 Timer_FixedDtPaced(void) {
+    return FixedDtPaced;
+}
+
 void Timer_RefusePacing(S32 refuse) {
     PacingRefused = refuse ? 1 : 0;
     if (PacingRefused)

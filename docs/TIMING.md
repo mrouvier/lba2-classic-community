@@ -52,6 +52,11 @@ Choose by intent:
 - **Wrapping a modal subloop (menu, dialogue, paused message) that should leave the game
   clock exactly where it found it**: `SaveTimer/RestoreTimer`. Example:
   `GamePaused` ([SOURCES/PERSO.CPP](../SOURCES/PERSO.CPP)), around the pause/clover dialog.
+  The message pause draws nothing and ends on a key, so its loop is a clock pump and an
+  input poll: where wall time is being spent, a live clock or a pinned clock paced to real
+  time, it sleeps a millisecond per poll instead of spinning a core, and under a replay,
+  which drains one recorded poll an iteration, or an unpaced pinned clock, a batch run meant
+  to outrun real time, it does not (`Timer_FixedDtPaced` says which).
 
 `SaveTimer/RestoreTimer` discarding time is intentional, not a bug. `LockTimer/UnlockTimer`
 *used* to discard time too — see the history section below.
@@ -246,6 +251,11 @@ When adding code that touches the timer, in rough order of how often you'll need
    change to `TimerRefHR`/`LastTime` semantics — the 5-tick golden catches one-frame
    timing drift across 50 diverse saves and is the strongest fixed-dt invariant the
    suite carries today.
+6. **A wait that polls but neither presents nor pumps** (the message pause in `GamePaused`)
+   idles a millisecond per poll where wall time is being spent, a live clock or a paced
+   pinned one, and never under a replay or an unpaced pinned clock; `Timer_FixedDtPaced`
+   says which. Nothing in such a loop mints a step, so the sleep changes wall time only,
+   and `tests/automation/test_pause_idle.sh` measures it.
 
 ## Related
 

@@ -41,6 +41,7 @@ extern S32 GfxDitherShading;
 #include "BOOT_EXIT.H"
 #include "UI_LAYOUT.H" /* UI_VCENTER_OFS */
 #include "MOUSE_CAPTURE.H"
+#include "RECORD.H" /* Record_IsReplaying: a replay's pause drains its recorded polls unslept */
 #include <SYSTEM/STRING.H>
 #include <SYSTEM/WINDOW.H>
 
@@ -408,6 +409,24 @@ void GamePaused(U32 flags) {
 
         if (flags & PAUSE_CLOVER AND TimerRefHR > endtimer)
             fin = TRUE;
+
+        /* The message pause draws nothing and ends on a key, so this loop is
+           a clock pump and an input poll and nothing else; polled back to
+           back it is a core spinning for as long as the game stays paused,
+           and a millisecond's sleep a poll idles it while still answering a
+           key within a frame. Only where wall time is what is being spent: a
+           live clock, or a pinned clock paced to real time, which is a
+           player's recording. Not a replay, which drains one recorded poll an
+           iteration, however many the file holds per paused second; not an
+           unpaced pinned clock, a batch run meant to finish sooner than real
+           time, whose key holds are metered in polls (CONTROL.CPP). Nothing
+           here mints a step, so under a pinned clock the reading every poll
+           records is the same slept or not. The clover pause draws and
+           presents a frame an iteration, so the test is on what the loop
+           draws rather than on the flag: a clover with no incrust to draw
+           idles like the message pause. */
+        if (!ptrdisp && (!Timer_FixedDtActive() || Timer_FixedDtPaced()) && !Record_IsReplaying())
+            g_platform.system.delay_ms(1);
     }
 
     FlagAnimWhoSpeak = FALSE;
