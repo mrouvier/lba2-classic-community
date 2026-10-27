@@ -173,15 +173,19 @@
 #define MOUSE_CAM_SENS_DEFAULT 4      /* default sensitivity (1-10 range) */
 
 /* HD vertical-FOV recompose (Auto camera only; community) -------------------*/
-/* The exterior projection has a fixed focal (ChampX/ChampZ = 600); a taller
- * framebuffer therefore reveals more vertical field of view rather than zooming,
- * so the frame fills with sky and the hero shrinks (see docs/WIDESCREEN.md
- * "Vertical framing at HD" and docs/CAMERA_INTERNALS.md). The follow camera answers this
- * by pulling its boom in and steepening its pitch ("recompose, not crop").
- * k = ModeDesiredY / 480; every lever scales with (k-1), expressed as the
- * hundredths excess kExcess = ModeDesiredY*100/480 - 100 (0 at 480, 125 at
- * 1080), so all three are exact no-ops at the original 480 height. Gains below
- * seed runtime globals; tune live via the cam_hd_* console cvars then bake. */
+/* The exterior projection has one focal (ChampX/ChampZ = 600) unless the
+ * exterior view lock scales it with the height (ExteriorFov, EXTFOV.H); on the
+ * fixed focal a taller framebuffer reveals more vertical field of view rather
+ * than zooming, so the frame fills with sky and the hero shrinks (see
+ * docs/WIDESCREEN.md "Vertical framing at HD" and docs/CAMERA_INTERNALS.md).
+ * The follow camera answers this by pulling its boom in and steepening its
+ * pitch ("recompose, not crop"). k = h / 480 with h the view's height
+ * (ExtFov_ViewHeightNow: the frame's ModeDesiredY, or 480 under the lock);
+ * every lever scales with (k-1), expressed as the hundredths excess
+ * kExcess = h*100/480 - 100 (0 at 480, 125 at 1080 off the lock, 0 at any
+ * height under it), so all three are exact no-ops at the original 480 height
+ * and whenever the lock holds. Gains below seed runtime globals; tune live via
+ * the cam_hd_* console cvars then bake. */
 #define FOLLOW_CAM_HD_RECOMPOSE_DEFAULT 1    /* master enable (cam_hd) */
 #define FOLLOW_CAM_HD_EXCESS_CAP_DEFAULT 0   /* cap on kExcess so tall res converges (0 = no cap / pure linear, the current behavior); e.g. 70 ~= 816p */
 #define FOLLOW_CAM_HD_PITCH_GAIN_DEFAULT 180 /* AlphaCam units added per 1.0 of (k-1) */

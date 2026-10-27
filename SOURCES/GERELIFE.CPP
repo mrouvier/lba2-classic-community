@@ -7,6 +7,7 @@
 #include <SYSTEM/LE.H>
 #include <SYSTEM/LOG.H> // lifetrace
 #include "AMBIANCE.H"
+#include "RAIN_FX.H" /* the storm's look hears LM_ECLAIR */
 
 U8 *PtrPrg;
 U8 TypeAnswer;
@@ -2505,6 +2506,7 @@ HERCULE( HPrintf( "errno= %d: %s\n", errno, strerror(errno) ) ) ;
 
             if (n != -1) {
                 ListIncrustDisp[n].TimerEnd = TimerRefHR + num * 100;
+                RainFx_Lightning();
             }
             break;
 

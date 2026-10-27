@@ -4,6 +4,7 @@
 #include "FOLLOWCAM.H"
 #include "FOLLOWCAM_CFG.H"
 #include "FOLLOWCAM_MATH.H"
+#include "EXTFOV.H" /* the view's height, which the HD recompose answers to */
 #include "SETTINGS.H"
 #include "INPUT.H"
 #include <SYSTEM/KEYBOARD_KEYS.H>
@@ -142,7 +143,11 @@ static S32 FollowCamWorldReturnCarry = 0; /* thousandths of a unit the return ha
  * host test covers). Callers pass 0 instead inside a camera zone, so an authored
  * shot is never recomposed. Tuning in FOLLOWCAM_CFG.H. */
 static S32 FollowCamHDExcess(void) {
-    return FollowCamHDExcessFor(FollowCamHDRecompose, (S32)ModeDesiredY, FollowCamHDExcessCap);
+    /* The view's height, not the frame's. The recompose corrects the extra
+       vertical view a frame taller than 480 shows with the fixed focal; under
+       the exterior view lock a tall frame shows the 1997 height of world, so
+       the view is 480 lines and the recompose stands down. */
+    return FollowCamHDExcessFor(FollowCamHDRecompose, ExtFov_ViewHeightNow(), FollowCamHDExcessCap);
 }
 
 /* cam_shot_blend_ms. Whether a blend may be shown at all: the Auto camera has

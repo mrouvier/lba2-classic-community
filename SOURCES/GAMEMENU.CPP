@@ -30,9 +30,11 @@
 #include <SYSTEM/STRING.H>
 #include <SYSTEM/WINDOW.H>
 #include <SYSTEM/MOUSE.H>
+#include <PLATFORM/PLATFORM.H> /* PLATFORM_FILTER_* (Scaling row) */
+#include <POLYGON/POLYFILT.H>  /* POLY_TEX_FILTER_* (Texture filter row) */
 
 #include "GAMEMENU_MOUSE.H"
-#include "CONFIG_FILE.H" /* ConfigFile_MarkVSyncSetThisRun */
+#include "CONFIG_FILE.H" /* ConfigFile_MarkVSyncSetThisRun, ConfigFile_SettingTable (Graphics rows) */
 #include "UI_LAYOUT.H"   /* UI_CENTER_X, UI_VCENTER_OFS */
 
 #include <dirent.h>
@@ -98,6 +100,12 @@ S32 FlagShowEndDemo = FALSE;
 #define MENU_ID_RESOLUTION 2115
 #define MENU_ID_DISPLAY_VSYNC 2116
 #define MENU_ID_RETAIL_FIXES 2117
+#define MENU_ID_GRAPHICS 2118
+#define MENU_ID_TEXTURE_FILTER 2119
+#define MENU_ID_DITHER_SHADING 2120
+#define MENU_ID_PRESENT_FILTER 2121
+#define MENU_ID_RAIN_SCALE 2122
+#define MENU_ID_EXTERIOR_FOV 2123
 
 // Resolution sub-page rows occupy a reserved id range: row i carries id
 // MENU_ID_RESOLUTION_BASE + i, which BuildCustomMenuText and GereResolutionMenu
@@ -133,7 +141,7 @@ U16 RealGameMainMenu[] = {
 
 U16 GameOptionMenu[] = {
     0,   // selected
-    6,   // nb entries
+    7,   // nb entries
     260, // y center
     0,   // .dia num
 
@@ -141,6 +149,8 @@ U16 GameOptionMenu[] = {
     26, // menu precedent
     0,
     MENU_ID_DISPLAY,
+    0,
+    MENU_ID_GRAPHICS,
     0,
     MENU_ID_SOUND_VOLUME,
     0,
@@ -171,6 +181,32 @@ U16 DisplayMenu[] = {
     MENU_ID_DISPLAY_VSYNC,
     0,
     MENU_ID_DISPLAY_FULLSCREEN,
+};
+
+// Graphics submenu: the rendering options the settings tables own (the
+// rasterizer and present rows in CONFIG_FILE.CPP, the rain row in
+// RAIN_SCALE.CPP, the exterior view row in EXTFOV.CPP), one cycling row each. Every row reads and writes its
+// T_SETTING through the table, so the range, the default and the "set this run"
+// mark that keeps a menu choice from being overwritten by a per-run environment
+// override all live in the table and nowhere here. See GereGraphicsMenu.
+U16 GraphicsMenu[] = {
+    0,   // selected
+    6,   // nb entries
+    260, // y center
+    0,   // .dia num
+
+    0,
+    26, // menu precedent
+    0,
+    MENU_ID_TEXTURE_FILTER,
+    0,
+    MENU_ID_DITHER_SHADING,
+    0,
+    MENU_ID_PRESENT_FILTER,
+    0,
+    MENU_ID_RAIN_SCALE,
+    0,
+    MENU_ID_EXTERIOR_FOV,
 };
 
 // Resolution sub-page, opened from the Display submenu's Resolution row.
@@ -405,6 +441,61 @@ const char *GetLocalizedResDialogLabel(int which) {
     return GetLocalizedMenuLabel(kMap[which]);
 }
 
+/* A Graphics row's setting by its lba2.cfg key, from whichever table owns it:
+   the menu names the key and never the variable behind it. */
+static const T_SETTING *GraphicsSetting(const char *key) {
+    const T_SETTING *table;
+    S32 count, t, i;
+
+    for (t = 0; (table = ConfigFile_SettingTable(t, &count)) != NULL; t++) {
+        for (i = 0; i < count; i++) {
+            if (table[i].key != NULL && strcmp(table[i].key, key) == 0)
+                return &table[i];
+        }
+    }
+    return NULL;
+}
+
+/* The live value of a Graphics row. A key no table has is a programming error;
+   the row then shows its first value rather than reading through NULL. */
+static S32 GraphicsSettingValue(const char *key) {
+    const T_SETTING *decl = GraphicsSetting(key);
+    return (decl != NULL) ? *decl->value : 0;
+}
+
+/* Write a Graphics row's setting through its table, so it is coerced, its
+   owner told and the run marked as having set it. */
+static void GraphicsSettingSet(const char *key, S32 value) {
+    const T_SETTING *decl = GraphicsSetting(key);
+    if (decl != NULL)
+        Settings_Apply(decl, value);
+}
+
+/* The Rain row cycles three looks over two settings: the 1997 storm, the storm
+   scaled to the framebuffer (RAIN_SCALE.H), and that storm drawn as translucent
+   streaks in a gusting wind (RAIN_FX.H). */
+static void RainRowCycle(void) {
+    if (GraphicsSettingValue("RainFx")) {
+        GraphicsSettingSet("RainFx", 0);
+        GraphicsSettingSet("RainScale", 0);
+    } else if (GraphicsSettingValue("RainScale")) {
+        GraphicsSettingSet("RainFx", 1);
+    } else {
+        GraphicsSettingSet("RainScale", 1);
+    }
+}
+
+/* Step a Graphics row to its next value, wrapping at the table's own range,
+   through Settings_Apply so the owner is told (the present filter reaches the
+   window backend through its on_change hook) and the run is marked as having
+   set it: without that mark a value that lands back on what LBA2_TEXFILTER or
+   LBA2_PRESENT_FILTER forced would be written back at the stored preference. */
+static void GraphicsSettingCycle(const char *key) {
+    const T_SETTING *decl = GraphicsSetting(key);
+    if (decl == NULL)
+        return;
+    Settings_Apply(decl, (*decl->value >= decl->max) ? decl->min : *decl->value + 1);
+}
 static void BuildCustomMenuText(S32 num, char *string) {
     // Resolution sub-page rows: id in the reserved range maps to a catalog
     // entry's label (e.g. "1280x720 (16:9)"). s_resMenuCount is set by
@@ -480,6 +571,47 @@ static void BuildCustomMenuText(S32 num, char *string) {
 
     case MENU_ID_DISPLAY_VSYNC:
         CopyUtf8ToCp850(string, 256, GetLocalizedMenuLabel(DisplayVSync ? MENU_LABEL_VSYNC_ON : MENU_LABEL_VSYNC_OFF));
+        break;
+
+    case MENU_ID_GRAPHICS:
+        CopyUtf8ToCp850(string, 256, GetLocalizedMenuLabel(MENU_LABEL_GRAPHICS));
+        break;
+
+    case MENU_ID_TEXTURE_FILTER: {
+        const S32 v = GraphicsSettingValue("TextureFilter");
+        CopyUtf8ToCp850(string, 256,
+                        GetLocalizedMenuLabel(v == POLY_TEX_FILTER_BILINEAR     ? MENU_LABEL_TEXFILTER_BILINEAR
+                                              : v == POLY_TEX_FILTER_HORIZONTAL ? MENU_LABEL_TEXFILTER_HORIZONTAL
+                                                                                : MENU_LABEL_TEXFILTER_OFF));
+        break;
+    }
+
+    case MENU_ID_DITHER_SHADING:
+        CopyUtf8ToCp850(string, 256,
+                        GetLocalizedMenuLabel(GraphicsSettingValue("DitherShading") ? MENU_LABEL_DITHER_ON
+                                                                                    : MENU_LABEL_DITHER_OFF));
+        break;
+
+    case MENU_ID_PRESENT_FILTER: {
+        const S32 v = GraphicsSettingValue("PresentFilter");
+        CopyUtf8ToCp850(string, 256,
+                        GetLocalizedMenuLabel(v == PLATFORM_FILTER_PIXELART ? MENU_LABEL_PRESENT_PIXELART
+                                              : v == PLATFORM_FILTER_LINEAR ? MENU_LABEL_PRESENT_LINEAR
+                                                                            : MENU_LABEL_PRESENT_NEAREST));
+        break;
+    }
+
+    case MENU_ID_RAIN_SCALE:
+        CopyUtf8ToCp850(string, 256,
+                        GetLocalizedMenuLabel(GraphicsSettingValue("RainFx")      ? MENU_LABEL_RAIN_ENHANCED
+                                              : GraphicsSettingValue("RainScale") ? MENU_LABEL_RAIN_SCALED
+                                                                                  : MENU_LABEL_RAIN_ORIGINAL));
+        break;
+
+    case MENU_ID_EXTERIOR_FOV:
+        CopyUtf8ToCp850(string, 256,
+                        GetLocalizedMenuLabel(GraphicsSettingValue("ExteriorFov") ? MENU_LABEL_EXTFOV_LOCKED
+                                                                                  : MENU_LABEL_EXTFOV_ORIGINAL));
         break;
 
     case MENU_ID_FOLLOW_CAMERA:
@@ -3427,6 +3559,64 @@ S32 GereDisplayMenu(void) {
     return FALSE;
 }
 
+// Graphics submenu: a self-contained submenu of OptionsMenu, one cycling row
+// per rendering option. The Scaling row applies to the frame being shown; the
+// rasterizer rows show on the next scene frame, behind the shaded menu; the
+// Rain row on the next storm frame, when GereRain (RAIN.CPP) grows the drop
+// count and AffRain reads the streak width; the Exterior view row sets the
+// projection again as it changes (EXTFOV.CPP) and shows on the next scene
+// frame. All persist with the rest of the settings through WriteConfigFile, as
+// the Display rows do.
+S32 GereGraphicsMenu(void) {
+    S32 select;
+    S32 flag = 0;
+
+    CopyScreen(Screen, Log);
+    BoxStaticAdd(0, 0, ModeDesiredX - 1, ModeDesiredY - 1);
+
+    if (FlagShadeMenu) {
+        ShadeBoxBlk(0, 0, (S32)ModeDesiredX - 1, (S32)ModeDesiredY - 1, SCREEN_SHADE_LVL);
+    }
+
+    while (!flag) {
+        select = DoGameMenu(GraphicsMenu);
+
+        switch (select) {
+        case 26:
+        case 1000:
+            flag = 1;
+            break;
+
+        case MENU_ID_TEXTURE_FILTER:
+            GraphicsSettingCycle("TextureFilter");
+            break;
+
+        case MENU_ID_DITHER_SHADING:
+            GraphicsSettingCycle("DitherShading");
+            break;
+
+        case MENU_ID_PRESENT_FILTER:
+            GraphicsSettingCycle("PresentFilter");
+            break;
+
+        case MENU_ID_RAIN_SCALE:
+            RainRowCycle();
+            break;
+
+        case MENU_ID_EXTERIOR_FOV:
+            GraphicsSettingCycle("ExteriorFov");
+            break;
+        }
+    }
+
+    CopyScreen(Screen, Log);
+    BoxStaticAdd(0, 0, ModeDesiredX - 1, ModeDesiredY - 1);
+
+    WaitNoInput();
+
+    return FALSE;
+}
+
 /*══════════════════════════════════════════════════════════════════════════*/
 /*══════════════════════════════════════════════════════════════════════════*/
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -3625,6 +3815,10 @@ S32 OptionsMenu(S32 flagflip) {
 
         case MENU_ID_DISPLAY:
             GereDisplayMenu();
+            break;
+
+        case MENU_ID_GRAPHICS:
+            GereGraphicsMenu();
             break;
         }
     }

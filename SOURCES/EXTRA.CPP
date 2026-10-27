@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include "AMBIANCE.H"
+#include "RAIN_FX.H" /* the storm's look hears the lightning spell */
 
 #define	CONE_GANT	2048
 #define	RND_BETA_BONUS	300	// Angle aléatoire rajouter
@@ -1180,6 +1181,7 @@ void	InvoqueFoudre( U8 owner, S32 x, S32 y, S32 z )
 	if( n!=-1 )
 	{
 		ListIncrustDisp[n].TimerEnd = TimerRefHR + 500 ;
+		RainFx_Lightning() ;
 	}
 
 	for( n=0; n<NbObjets; n++, ptrobj++ )
