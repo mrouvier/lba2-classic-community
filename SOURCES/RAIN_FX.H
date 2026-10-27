@@ -161,21 +161,33 @@ static inline S32 RainFx_RippleRadius(S32 xp, S32 dt) {
     return xp + 1 + (xp * 2 * age) / 80;
 }
 
+/* The depth a ring of ry rows may be from its impact and still be the
+ * surface the drop struck: LineRain's tolerance on the impact plus the ground
+ * the rows span at either camera pitch, about ry * z / 256 in the scaled
+ * depth. A wall behind the impact or an actor on it is further than that. */
+static inline S32 RainFx_RippleSurface(S32 ry, S32 z) {
+    return 200 + ry * z / 256;
+}
+
 /* Whether drop `index` of the pool is one of the near layer, every fourth. */
 static inline S32 RainFx_NearDrop(S32 fx, S32 index) {
     return fx && (index & 3) == 0;
 }
 
-/* The drops the look runs: a third more than the storm's scale gives, scaled
- * by the intensity (1/256), within the pool, so the near layer, a quarter of
- * the run, adds to the storm; past the pool's cap (a scaled count over 1012,
- * frames above about 1.55 Mpx) it is taken from the far veil instead. Off, the
- * count as it is. */
+/* The drops the look runs: a third more than the storm's scale gives, within
+ * the pool, then scaled by the intensity (1/256), so the lull is two thirds of
+ * what runs at any frame; the near layer, a quarter of the run, adds to the
+ * storm up to the pool's cap (a scaled count over 1012, frames above about
+ * 1.55 Mpx), past which it is taken from the far veil, and a burst adds only
+ * what the pool leaves. Off, the count as it is. */
 static inline S32 RainFx_Count(S32 fx, S32 count, S32 intensity, S32 pool) {
     S32 n;
     if (!fx)
         return count;
-    n = (count + count / 3) * intensity / 256;
+    n = count + count / 3;
+    if (n > pool)
+        n = pool;
+    n = n * intensity / 256;
     if (n < 1)
         n = 1;
     return (n > pool) ? pool : n;
@@ -198,6 +210,11 @@ extern S32 RainFx_DropCount(S32 count);
  * LM_ECLAIR, the lightning spell): the look gusts and bursts after it. */
 extern void RainFx_Lightning(void);
 
+/* The look's memory of the last strike, cleared when the storm is set up
+ * again (InitRain): a load, which both ends of a recording take, starts both
+ * from no strike, so the count they draw the first drops with is the same. */
+extern void RainFx_Reset(void);
+
 /* Start a near drop: between the eye and the view's target, 15% to 64% of the
  * way, within the view's width there, and above the view ray so it falls
  * across it. Four draws from the shared random stream, one more than
@@ -212,10 +229,12 @@ extern S32 RainFx_DeltaYZ(S32 d);
 
 /* The ripple of a splash: a ring on the ground around the impact (x, y) at
  * scaled depth z, growing with the splash's age dt (ms) from the arms' half
- * width xp, blended at half strength and drawn only on the surface the drop
- * struck (a pixel much nearer or deeper than the impact is something else).
- * Grows the box (bx0, by0)-(bx1, by1) over what it drew. Nothing with the
- * setting off, or for a splash too far away to have a ring wider than its V. */
+ * width xp, blended at three quarters for the splash's first 40 ms and at half
+ * after, drawn only on the surface the drop struck (a pixel much nearer or
+ * deeper than the impact is something else). Grows the box (bx0, by0)-(bx1,
+ * by1) over what it drew. Nothing with the setting off, or for a splash so far
+ * away that its V has no width (xp < 1): there is nothing for a ring to
+ * surround. */
 extern void RainFx_Ripple(S32 x, S32 y, S32 z, S32 xp, S32 dt, S32 c, S32 *bx0, S32 *by0, S32 *bx1, S32 *by1);
 
 /* A drop's streak or a splash's arm, from (x0, y0) at scaled depth z0 to

@@ -51,6 +51,10 @@ void RainFx_Lightning(void) {
     s_lastFlash = TimerRefHR ? TimerRefHR : 1;
 }
 
+void RainFx_Reset(void) {
+    s_lastFlash = 0;
+}
+
 /* The clock is read only with the look on: off, the frame's drift is the 1997
    half of the delta and the streak its 1997 length, nothing of the wind. */
 S32 RainFx_DriftX(S32 delta) {
@@ -96,11 +100,6 @@ void RainFx_InitNear(T_RAIN *pt) {
    streak's depth less RAIN_FX_RANGE / 2 hides it, one within RAIN_FX_RANGE of
    that is the ground it splashes on. */
 #define RAIN_FX_RANGE 200
-
-/* How far, in the same depth units, a pixel may be from a splash's impact and
-   still be the surface the drop struck: the ring lies on that surface and is
-   hidden by anything nearer, and not drawn into a hole deeper than it. */
-#define RAIN_FX_RIPPLE_SURFACE 1500
 
 /* Clip the segment to the clip window, moving its ends and depths along it.
    Returns 0 when nothing of it is inside. The window is inclusive on every
@@ -247,8 +246,10 @@ static S32 Streak(S32 x0, S32 y0, S32 z0, S32 x1, S32 y1, S32 z1, S32 c) {
     return flags;
 }
 
-/* A ring pixel: on the struck surface, within the clip, blended at strength q. */
-static void RipplePixel(S32 x, S32 y, S32 z, U8 colour, S32 q, S32 *bx0, S32 *by0, S32 *bx1, S32 *by1) {
+/* A ring pixel: on the struck surface, within `surface` of the impact's depth
+   either way, within the clip, blended at strength q. */
+static void RipplePixel(S32 x, S32 y, S32 z, S32 surface, U8 colour, S32 q, S32 *bx0, S32 *by0, S32 *bx1,
+                        S32 *by1) {
     U8 *log = (U8 *)Log;
     U32 off;
     S32 d;
@@ -257,7 +258,7 @@ static void RipplePixel(S32 x, S32 y, S32 z, U8 colour, S32 q, S32 *bx0, S32 *by
         return;
     off = PTR_TabOffLine[y] + (U32)x;
     d = (S32)PtrZBuffer[off] - z;
-    if (d < -RAIN_FX_RIPPLE_SURFACE || d > RAIN_FX_RIPPLE_SURFACE)
+    if (d < -surface || d > surface)
         return;
     log[off] = PolyBlendLUT[q - 1][(((U32)log[off]) << 8) | colour];
     if (x < *bx0)
@@ -271,15 +272,16 @@ static void RipplePixel(S32 x, S32 y, S32 z, U8 colour, S32 q, S32 *bx0, S32 *by
 }
 
 void RainFx_Ripple(S32 x, S32 y, S32 z, S32 xp, S32 dt, S32 c, S32 *bx0, S32 *by0, S32 *bx1, S32 *by1) {
-    S32 rx, ry, px, py, q;
+    S32 rx, ry, px, py, q, surface;
     S64 rx2, ry2, err;
     U8 colour;
 
     if (!RainFx || xp < 1)
         return;
 
-    /* The ring widens with the age and rounds to the V's half width three
-       times over; flattened to half its width, as the ground is seen. */
+    /* The ring widens with the age, from the V's half width to three times
+       it; flattened to half its width, as the ground is seen. Strong while
+       young, half strength as it widens. */
     rx = RainFx_RippleRadius(xp, dt);
     ry = rx / 2 + 1;
     q = (dt < 40) ? 3 : 2;
@@ -287,18 +289,22 @@ void RainFx_Ripple(S32 x, S32 y, S32 z, S32 xp, S32 dt, S32 c, S32 *bx0, S32 *by
     if (Fill_Flag_Fog == 1)
         colour = Fill_Logical_Palette[colour];
     z &= 0xFFFF;
+    surface = RainFx_RippleSurface(ry, z);
 
-    /* Midpoint ellipse, the four quadrants from each step. */
+    /* Midpoint ellipse, the four quadrants from each step; a pole, where two
+       quadrants meet, is drawn once. */
     rx2 = (S64)rx * rx;
     ry2 = (S64)ry * ry;
     px = 0;
     py = ry;
     err = ry2 - rx2 * ry + rx2 / 4;
     while (ry2 * px < rx2 * py) {
-        RipplePixel(x + px, y + py, z, colour, q, bx0, by0, bx1, by1);
-        RipplePixel(x - px, y + py, z, colour, q, bx0, by0, bx1, by1);
-        RipplePixel(x + px, y - py, z, colour, q, bx0, by0, bx1, by1);
-        RipplePixel(x - px, y - py, z, colour, q, bx0, by0, bx1, by1);
+        RipplePixel(x + px, y + py, z, surface, colour, q, bx0, by0, bx1, by1);
+        RipplePixel(x + px, y - py, z, surface, colour, q, bx0, by0, bx1, by1);
+        if (px) {
+            RipplePixel(x - px, y + py, z, surface, colour, q, bx0, by0, bx1, by1);
+            RipplePixel(x - px, y - py, z, surface, colour, q, bx0, by0, bx1, by1);
+        }
         if (err < 0) {
             err += ry2 * (2 * px + 3);
         } else {
@@ -309,10 +315,12 @@ void RainFx_Ripple(S32 x, S32 y, S32 z, S32 xp, S32 dt, S32 c, S32 *bx0, S32 *by
     }
     err = ry2 * ((S64)px * px + px) + rx2 * ((S64)py * py - py) - rx2 * ry2;
     while (py >= 0) {
-        RipplePixel(x + px, y + py, z, colour, q, bx0, by0, bx1, by1);
-        RipplePixel(x - px, y + py, z, colour, q, bx0, by0, bx1, by1);
-        RipplePixel(x + px, y - py, z, colour, q, bx0, by0, bx1, by1);
-        RipplePixel(x - px, y - py, z, colour, q, bx0, by0, bx1, by1);
+        RipplePixel(x + px, y + py, z, surface, colour, q, bx0, by0, bx1, by1);
+        RipplePixel(x - px, y + py, z, surface, colour, q, bx0, by0, bx1, by1);
+        if (py) {
+            RipplePixel(x + px, y - py, z, surface, colour, q, bx0, by0, bx1, by1);
+            RipplePixel(x - px, y - py, z, surface, colour, q, bx0, by0, bx1, by1);
+        }
         if (err > 0) {
             err += rx2 * (3 - 2 * py);
         } else {

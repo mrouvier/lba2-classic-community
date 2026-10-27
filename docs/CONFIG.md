@@ -115,7 +115,6 @@ lba2.cfg stores user preferences and last-save info. Read at startup, written at
 | ExteriorFov | The exterior view at the current resolution: 0 (default) the fixed focal, so a taller frame shows more world; 1 keeps the 1997 vertical field of view, the focal following the height, so detail grows with the resolution and only the width grows with the aspect ratio. Console cvar `gfx_fov`. Recorded: the original reads what is on screen. See [GFX_OPTIONS.md](GFX_OPTIONS.md) | ExtFov_ReadConfig / ExtFov_WriteConfig | Options → Graphics ("Exterior view") |
 | RetailFixes | Fix retail bugs: 0 no, 1 yes (default), 2 custom. Console cvar `fix_retail`. See "Retail fixes" below | RetailFix_ReadConfig / RetailFix_WriteConfig | Options → Advanced options |
 | RetailFixFoundObjWalk | A direction held through a found-item popup still moves Twinsen afterwards. 1 (default) on. Console cvar `fix_found_obj_walk`. Applies only while `RetailFixes` is 2 | RetailFix_ReadConfig / RetailFix_WriteConfig | console only |
-| RetailFixLightningCadence | The lightning strobe toggles its palette once per frame drawn, so it runs at half the frame rate: 10 Hz at the 1997 game's 20 fps, 30 Hz under a 60 Hz vsync. 1 (default) paces the toggle at the 1997 cadence, one per 50 ms, at any frame rate; 0 strobes with the frame rate as the original does. Console cvar `fix_lightning_cadence`. Applies only while `RetailFixes` is 2 | RetailFix_ReadConfig / RetailFix_WriteConfig | console only |
 | RetailFixTerrainSeams | Hairline seams show between the cubes of the outdoor ground. 1 (default) draws the terrain, sea and sky on the 1997 integer path, with no seams and the same on every platform; 0 keeps the float path the rest of the game uses, as lba2cc drew it before. Console cvar `fix_terrain_seams`. Applies only while `RetailFixes` is 2 | RetailFix_ReadConfig / RetailFix_WriteConfig | console only |
 
 ### Retail fixes
@@ -137,8 +136,8 @@ A fix that writes game state (a quest flag, a count) leaves it in the save. Swit
 later changes the rules from then on and does not undo what it wrote.
 
 A replay runs a fix the way its recording did: every fix row and the master row are recorded. A
-recording made before `RetailFixTerrainSeams` or `RetailFixLightningCadence` existed replays with
-it off, whatever `RetailFixes` says ([RECORDING.md](RECORDING.md)).
+recording made before `RetailFixTerrainSeams` existed replays with it off, whatever `RetailFixes`
+says ([RECORDING.md](RECORDING.md)).
 
 ## How a key is declared
 

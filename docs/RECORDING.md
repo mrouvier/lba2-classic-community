@@ -701,15 +701,14 @@ absent. Neither is a divergence; both say which settings the replay could not ch
 
 The exception is a setting added after the header carried every setting: a recording without it was
 made before it existed, so it ran on the setting's value from before, and the replay borrows that
-and says so (`SETTING_ABSENT_BEFORE` in `SETTINGS.H`). Five rows do. The terrain-seams retail fix,
+and says so (`SETTING_ABSENT_BEFORE` in `SETTINGS.H`). Four rows do. The terrain-seams retail fix,
 `RetailFixTerrainSeams`, because its depths reach rain splashes and the random stream: an older
 recording replays with the outdoor ground on the float path it was made on, whatever **Fix retail
 bugs** says. The storm's scale, `RainScale`, because every drop it adds draws from the random
 stream, the storm's look, `RainFx`, because its wind, its ground test and its near layer do too,
-the exterior view's lock, `ExteriorFov`, because the original reads what is on screen, and the
-lightning-cadence retail fix, `RetailFixLightningCadence`, which moves no game state but is a fix
-row like the others: an older recording replays with the 1997 storm, the fixed focal and the
-frame-rate strobe, whatever the menus say. For the first, the console reads
+and the exterior view's lock, `ExteriorFov`, because the original reads what is on screen: an
+older recording replays with the 1997 storm and the fixed focal, whatever the Graphics menu says.
+For the first, the console reads
 
 ```
 [rec] this recording predates RetailFixTerrainSeams: replaying at its value from before, 0 (yours: 1, given back when it ends)

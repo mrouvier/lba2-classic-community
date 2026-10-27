@@ -33,25 +33,11 @@ static void test_the_menu_offers_custom_once_a_fix_is_changed(void) {
     ASSERT_EQ_INT(RETAIL_FIXES_YES, RetailFix_NextMenuValue(RETAIL_FIXES_CUSTOM, 0));
 }
 
-/* The lightning strobe toggles on every call with the fix off, and once per
- * 50 ms with it on, from the time of the last toggle. */
-static void test_the_lightning_strobe_is_paced_by_the_fix(void) {
-    U32 last = 0;
-    ASSERT_EQ_INT(1, RetailFix_LightningToggle(0, 1000, &last));
-    ASSERT_EQ_INT(1, RetailFix_LightningToggle(0, 1016, &last));
-    ASSERT_EQ_INT(1, RetailFix_LightningToggle(1, 2000, &last));
-    ASSERT_EQ_INT(0, RetailFix_LightningToggle(1, 2016, &last));
-    ASSERT_EQ_INT(0, RetailFix_LightningToggle(1, 2049, &last));
-    ASSERT_EQ_INT(1, RetailFix_LightningToggle(1, 2050, &last));
-    ASSERT_EQ_INT((int)2050, (int)last);
-}
-
 int main(void) {
     RUN_TEST(test_yes_and_no_override_the_fix);
     RUN_TEST(test_custom_follows_the_fix);
     RUN_TEST(test_the_menu_skips_custom_when_it_means_nothing);
     RUN_TEST(test_the_menu_offers_custom_once_a_fix_is_changed);
-    RUN_TEST(test_the_lightning_strobe_is_paced_by_the_fix);
     TEST_SUMMARY();
     return test_failures != 0;
 }

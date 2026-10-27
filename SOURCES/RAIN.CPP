@@ -77,6 +77,7 @@ void	RestartOneRain( T_RAIN *pt )
 void InitRain() {
     S32 i;
 
+    RainFx_Reset();
     NbRain = RainFx_DropCount(RainScale_DropCount());
 
     for (i = 0; i < NbRain; i++) {

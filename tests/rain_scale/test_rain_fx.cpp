@@ -90,7 +90,9 @@ static void test_the_look_adds_a_third_within_the_pool(void) {
     ASSERT_EQ_INT(200, RainFx_Count(0, 200, 100, 1350));
     ASSERT_EQ_INT(266, RainFx_Count(1, 200, 256, 1350));
     ASSERT_EQ_INT(1350, RainFx_Count(1, 1350, 256, 1350));
-    ASSERT_EQ_INT(177, RainFx_Count(1, 200, 171, 1350)); /* the lull's bottom */
+    ASSERT_EQ_INT(177, RainFx_Count(1, 200, 171, 1350));   /* the lull's bottom */
+    ASSERT_EQ_INT(901, RainFx_Count(1, 1350, 171, 1350));  /* a full pool still lulls to two thirds */
+    ASSERT_EQ_INT(1350, RainFx_Count(1, 1350, 341, 1350)); /* and a burst adds nothing there */
     ASSERT_EQ_INT(1, RainFx_Count(1, 1, 171, 1350));
     ASSERT_EQ_INT(1, RainFx_NearDrop(1, 0));
     ASSERT_EQ_INT(0, RainFx_NearDrop(1, 1));
@@ -113,6 +115,8 @@ static void test_the_ripple_grows_with_the_splash(void) {
     ASSERT_EQ_INT(13, RainFx_RippleRadius(4, 80));
     ASSERT_EQ_INT(13, RainFx_RippleRadius(4, 200)); /* clamped to the life */
     ASSERT_EQ_INT(2, RainFx_RippleRadius(1, 0));
+    ASSERT_EQ_INT(536, RainFx_RippleSurface(6, 14336)); /* a near ring: 200 plus 6 rows of ground */
+    ASSERT_EQ_INT(200, RainFx_RippleSurface(0, 14336));
 }
 
 /* A strike gusts to +200 at its middle and is gone after 1.5 s; the storm
