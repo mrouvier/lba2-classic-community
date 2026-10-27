@@ -173,11 +173,12 @@ void AffRain() {
             f |= RainFx_Line(x, y, z, x1, y0, z, c);
 
             if (f & 1) {
-                S32 bx1 = x1, by0 = y0, by1 = y1;
+                S32 bx0 = x0, bx1 = x1, by0 = y0, by1 = y1;
 
                 RainScale_DrawColumns(x, y, z, x0, y0, z, c, width, &by0, &bx1, &by1);
                 RainScale_DrawColumns(x, y, z, x1, y0, z, c, width, &by0, &bx1, &by1);
-                RainScale_BoxAdd(x0, by0, bx1, by1);
+                RainFx_Ripple(x, y, z, xp, dt, c, &bx0, &by0, &bx1, &by1);
+                RainScale_BoxAdd(bx0, by0, bx1, by1);
             }
 
             if (dt && !yp) {

@@ -25,8 +25,9 @@ struct T_SETTING; /* SETTINGS.H; a pointer to a table needs no more */
  * than an option of their own: docs/knowledge/decisions/a-retail-fix-is-a-switch-under-one-row.md. */
 
 typedef enum {
-    RETAIL_FIX_FOUND_OBJ_WALK, /* a direction held through the found-item popup sticks */
-    RETAIL_FIX_TERRAIN_SEAMS,  /* hairline seams between the outdoor ground's cubes */
+    RETAIL_FIX_FOUND_OBJ_WALK,    /* a direction held through the found-item popup sticks */
+    RETAIL_FIX_TERRAIN_SEAMS,     /* hairline seams between the outdoor ground's cubes */
+    RETAIL_FIX_LIGHTNING_CADENCE, /* the lightning strobe runs at half the frame rate */
     RETAIL_FIX_COUNT
 } T_RETAIL_FIX;
 
@@ -59,6 +60,20 @@ static inline S32 RetailFix_Effective(S32 master, S32 fixOn) {
     if (master == RETAIL_FIXES_CUSTOM)
         return fixOn ? 1 : 0;
     return master == RETAIL_FIXES_NO ? 0 : 1;
+}
+
+/* The lightning strobe's cadence. The original toggles the flash palette on
+ * every frame it draws inside the strobe's window, so the strobe runs at half
+ * the frame rate: 10 Hz at 1997's 20 fps, 30 Hz under a 60 Hz vsync. With the
+ * fix a toggle waits RETAIL_FIX_LIGHTNING_MS since the last, which is the 1997
+ * cadence at any frame rate. `last` is the time of the last toggle and is
+ * updated when one happens. */
+#define RETAIL_FIX_LIGHTNING_MS 50
+static inline S32 RetailFix_LightningToggle(S32 fixOn, U32 now, U32 *last) {
+    if (fixOn && now - *last < RETAIL_FIX_LIGHTNING_MS)
+        return 0;
+    *last = now;
+    return 1;
 }
 
 /* The menu row's cycle: Yes, No, then Custom only when some fix's own setting

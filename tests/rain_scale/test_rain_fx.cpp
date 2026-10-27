@@ -83,11 +83,15 @@ static void test_the_streak_lengthens_and_leans(void) {
     ASSERT_EQ_INT(512, RainFx_StreakYZ(1, 256));
 }
 
-/* The look runs a third more drops than the scale gives, within the pool. */
+/* The look runs a third more drops than the scale gives, by the intensity,
+ * within the pool. */
 static void test_the_look_adds_a_third_within_the_pool(void) {
-    ASSERT_EQ_INT(200, RainFx_Count(0, 200, 1350));
-    ASSERT_EQ_INT(266, RainFx_Count(1, 200, 1350));
-    ASSERT_EQ_INT(1350, RainFx_Count(1, 1350, 1350));
+    ASSERT_EQ_INT(200, RainFx_Count(0, 200, 256, 1350));
+    ASSERT_EQ_INT(200, RainFx_Count(0, 200, 100, 1350));
+    ASSERT_EQ_INT(266, RainFx_Count(1, 200, 256, 1350));
+    ASSERT_EQ_INT(1350, RainFx_Count(1, 1350, 256, 1350));
+    ASSERT_EQ_INT(177, RainFx_Count(1, 200, 171, 1350)); /* the lull's bottom */
+    ASSERT_EQ_INT(1, RainFx_Count(1, 1, 171, 1350));
     ASSERT_EQ_INT(1, RainFx_NearDrop(1, 0));
     ASSERT_EQ_INT(0, RainFx_NearDrop(1, 1));
     ASSERT_EQ_INT(1, RainFx_NearDrop(1, 4));
@@ -102,6 +106,28 @@ static void test_the_near_layer_is_as_wide_as_the_view(void) {
     ASSERT_EQ_INT(800, RainFx_NearHalfWidth(0, 1920));
 }
 
+/* The ripple starts as wide as the V and triples over the splash's 80 ms. */
+static void test_the_ripple_grows_with_the_splash(void) {
+    ASSERT_EQ_INT(5, RainFx_RippleRadius(4, 0));
+    ASSERT_EQ_INT(9, RainFx_RippleRadius(4, 40));
+    ASSERT_EQ_INT(13, RainFx_RippleRadius(4, 80));
+    ASSERT_EQ_INT(13, RainFx_RippleRadius(4, 200)); /* clamped to the life */
+    ASSERT_EQ_INT(2, RainFx_RippleRadius(1, 0));
+}
+
+/* A strike gusts to +200 at its middle and is gone after 1.5 s; the storm
+ * lulls to two thirds over 45 s and bursts a third after a strike. */
+static void test_lightning_gusts_and_the_storm_lulls(void) {
+    ASSERT_EQ_INT(0, RainFx_FlashGust(-1));
+    ASSERT_EQ_INT(200, RainFx_FlashGust(750));
+    ASSERT_EQ_INT(0, RainFx_FlashGust(1500));
+    ASSERT_EQ_INT(256, RainFx_Intensity(0, -1));
+    ASSERT_EQ_INT(171, RainFx_Intensity(22500, -1));
+    ASSERT_EQ_INT(256, RainFx_Intensity(45000, -1));
+    ASSERT_EQ_INT(256 + 85, RainFx_Intensity(0, 750));
+    ASSERT_EQ_INT(RainFx_Intensity(1234, -1), RainFx_Intensity(1234 - 45000, -1));
+}
+
 int main(void) {
     RUN_TEST(test_off_is_the_1997_drift);
     RUN_TEST(test_the_wind_scales_the_drift);
@@ -113,6 +139,8 @@ int main(void) {
     RUN_TEST(test_the_streak_lengthens_and_leans);
     RUN_TEST(test_the_look_adds_a_third_within_the_pool);
     RUN_TEST(test_the_near_layer_is_as_wide_as_the_view);
+    RUN_TEST(test_the_ripple_grows_with_the_splash);
+    RUN_TEST(test_lightning_gusts_and_the_storm_lulls);
     TEST_SUMMARY();
     return test_failures != 0;
 }

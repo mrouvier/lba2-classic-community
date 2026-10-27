@@ -48,6 +48,28 @@ static inline S32 RainFx_Wind(S32 t) {
     return 256 + sway + gust;
 }
 
+/* The gust a lightning strike adds, `age` ms after it, in the same 1/256: up
+ * to +200, rising and falling over 1.5 s; nothing before the first strike. */
+static inline S32 RainFx_FlashGust(S32 age) {
+    if (age < 0 || age >= 1500)
+        return 0;
+    return (200 * age / 750) * (1500 - age) / 750;
+}
+
+/* The storm's intensity at time t (ms), in 1/256 of its count: lulls to two
+ * thirds and back over 45 s, and a burst of up to a third more for 1.5 s after
+ * a lightning strike `flashAge` ms ago. Integer only, as the wind. */
+static inline S32 RainFx_Intensity(S32 t, S32 flashAge) {
+    S32 u = t % 45000;
+    S32 v, lull, burst;
+    if (u < 0)
+        u += 45000;
+    v = (u < 22500) ? u : 45000 - u; /* 0..22500, a triangle over the cycle */
+    lull = 85 * v / 22500;            /* 0 at full strength, 85 at the lull's bottom */
+    burst = (flashAge >= 0 && flashAge < 1500) ? (85 * flashAge / 750) * (1500 - flashAge) / 750 : 0;
+    return 256 - lull + burst;
+}
+
 /* A frame's drift along X for the storm's delta: the 1997 half of it, or that
  * half blown by the wind. */
 static inline S32 RainFx_Drift(S32 fx, S32 delta, S32 wind) {
@@ -96,19 +118,28 @@ static inline S32 RainFx_ExtraWidth(S32 z) {
     return (z < 12000) ? 1 : 0;
 }
 
+/* The ripple's half width at age dt (ms), from the splash's half width xp:
+ * the V's width, growing to three times it over the splash's life. */
+static inline S32 RainFx_RippleRadius(S32 xp, S32 dt) {
+    const S32 age = (dt > 80) ? 80 : (dt < 0 ? 0 : dt);
+    return xp + 1 + (xp * 2 * age) / 80;
+}
+
 /* Whether drop `index` of the pool is one of the near layer, every fourth. */
 static inline S32 RainFx_NearDrop(S32 fx, S32 index) {
     return fx && (index & 3) == 0;
 }
 
-/* The drops the look runs: a third more than the storm's scale gives, within
- * the pool, so the near layer adds to the storm rather than thinning its far
- * veil. Off, the count as it is. */
-static inline S32 RainFx_Count(S32 fx, S32 count, S32 pool) {
+/* The drops the look runs: a third more than the storm's scale gives, scaled
+ * by the intensity (1/256), within the pool, so the near layer adds to the
+ * storm rather than thinning its far veil. Off, the count as it is. */
+static inline S32 RainFx_Count(S32 fx, S32 count, S32 intensity, S32 pool) {
     S32 n;
     if (!fx)
         return count;
-    n = count + count / 3;
+    n = (count + count / 3) * intensity / 256;
+    if (n < 1)
+        n = 1;
     return (n > pool) ? pool : n;
 }
 
@@ -125,6 +156,10 @@ extern S32 RainFx_DriftX(S32 delta);
 /* The drops to run for the storm's scaled count (RAIN.CPP). */
 extern S32 RainFx_DropCount(S32 count);
 
+/* A lightning strike, from the two places that start one (the life script's
+ * LM_ECLAIR, the lightning spell): the look gusts and bursts after it. */
+extern void RainFx_Lightning(void);
+
 /* Start a near drop: between the eye and the view's target, a fifth to two
  * thirds of the way, within the view's width there, and above the view ray so
  * it falls across it. Three draws from the shared random stream, as
@@ -135,6 +170,14 @@ extern void RainFx_InitNear(T_RAIN *pt);
  * are, or doubled and leaning with the live wind. */
 extern S32 RainFx_DeltaX(S32 dx);
 extern S32 RainFx_DeltaYZ(S32 d);
+
+/* The ripple of a splash: a ring on the ground around the impact (x, y) at
+ * scaled depth z, growing with the splash's age dt (ms) from the arms' half
+ * width xp, blended at half strength and drawn only on the surface the drop
+ * struck (a pixel much nearer or deeper than the impact is something else).
+ * Grows the box (bx0, by0)-(bx1, by1) over what it drew. Nothing with the
+ * setting off, or for a splash too far away to have a ring wider than its V. */
+extern void RainFx_Ripple(S32 x, S32 y, S32 z, S32 xp, S32 dt, S32 c, S32 *bx0, S32 *by0, S32 *bx1, S32 *by1);
 
 /* A drop's streak or a splash's arm, from (x0, y0) at scaled depth z0 to
  * (x1, y1) at z1 in colour c: LineRain's contract (bit 0 of the return, the

@@ -4,7 +4,7 @@
 /* See RETAILFIX.H. */
 
 S32 RetailFixes = RETAIL_FIXES_YES;
-static S32 RetailFixOn[RETAIL_FIX_COUNT] = {1, 1};
+static S32 RetailFixOn[RETAIL_FIX_COUNT] = {1, 1, 1};
 
 static void RetailFix_FixChanged(S32 value);
 
@@ -31,6 +31,14 @@ static const T_SETTING RetailFixSettings[] = {
     {"RetailFixTerrainSeams", NULL, "fix_terrain_seams", &RetailFixOn[RETAIL_FIX_TERRAIN_SEAMS], SETTING_TRUTHY,
      1, 0, 1, NULL, NULL, RetailFix_FixChanged, NULL,
      "Retail fix: hairline seams show between the cubes of the outdoor ground", SETTING_RECORDED,
+     SETTING_BEFORE(0), SETTING_ABSENT_BEFORE},
+    /* The lightning strobe toggles the flash palette once per frame drawn
+       (OBJECT.CPP, INCRUST_ECLAIR), so its rate follows the frame rate; the fix
+       paces it at the 1997 cadence. Recorded like every row here, though it
+       moves no game state: a palette is all it touches. */
+    {"RetailFixLightningCadence", NULL, "fix_lightning_cadence", &RetailFixOn[RETAIL_FIX_LIGHTNING_CADENCE],
+     SETTING_TRUTHY, 1, 0, 1, NULL, NULL, RetailFix_FixChanged, NULL,
+     "Retail fix: the lightning strobe runs at half the frame rate; on, it keeps the 1997 cadence", SETTING_RECORDED,
      SETTING_BEFORE(0), SETTING_ABSENT_BEFORE},
     {"RetailFixes", NULL, "fix_retail", &RetailFixes, SETTING_OR_DEFAULT, RETAIL_FIXES_YES, RETAIL_FIXES_NO,
      RETAIL_FIXES_CUSTOM, NULL, NULL, NULL, NULL,

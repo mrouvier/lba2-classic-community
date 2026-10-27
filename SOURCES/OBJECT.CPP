@@ -23,6 +23,8 @@
 #include <SYSTEM/KEYBOARD_KEYS.H>
 #include <stdint.h>
 #include "AMBIANCE.H"
+#include "RETAILFIX.H" /* the lightning strobe's cadence */
+#include "RAIN_FX.H"   /* the storm's look hears the lightning */
 
 extern S32 FlagAnimWhoSpeak; // MESSAGE.CPP
 
@@ -979,6 +981,10 @@ void RestartPerso() {
 /*──────────────────────────────────────────────────────────────────────────*/
 
 //▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+/* When the lightning strobe last toggled its palette, for the cadence fix
+   (RETAILFIX.H). One strobe runs at a time, so one time serves. */
+static U32 LightningToggle = 0;
+
 void ClearFoudre(void) {
     S32 n;
     T_INCRUST_DISP *ptrdisp = ListIncrustDisp;
@@ -6145,7 +6151,8 @@ startaffscene:
         case INCRUST_ECLAIR:
             // pas de gestion pendant un message
             if (!FlagAnimWhoSpeak) {
-                if ((TimerRefHR & 0xFF) > 100) {
+                if ((TimerRefHR & 0xFF) > 100 AND RetailFix_LightningToggle(RetailFix_On(RETAIL_FIX_LIGHTNING_CADENCE), TimerRefHR,
+                                                                            &LightningToggle)) {
                     if (ptrdisp->Info) {
                         changepal = PtrPal;
                     } else {
