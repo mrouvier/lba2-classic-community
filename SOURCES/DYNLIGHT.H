@@ -1218,6 +1218,12 @@ extern void DynLight_MovingPass(void);
 extern void DynLight_BeginBodies(void);
 extern void DynLight_EndBodies(void);
 extern void DynLight_BodyBackground(S32 background);
+/* OBJECT.CPP, a sprite actor between those two: before PtrAffGraph draws
+   sprite `num` at (x, y), and after, with its middle in the world and
+   whether it is being baked into the background (it then takes the static
+   lights only). The pixels the draw changed take the light there. */
+extern void DynLight_SpriteBegin(S32 num, S32 x, S32 y);
+extern void DynLight_SpriteEnd(S32 wx, S32 wy, S32 wz, S32 background);
 /* The colour stage, at present time (SetPresentLightCallback): `argb` is the
    frame Phys was just converted to, `pitch` in bytes, `pal` the palette it was
    converted with. Pure: it reads what the last scene kept and writes `argb`. */

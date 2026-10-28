@@ -5119,11 +5119,13 @@ S32 AffOneObject(T_SORT *pt) {
             // sprites
             if (ClipXMin <= ClipXMax
                                 AND ClipYMin <= ClipYMax) {
+                DynLight_SpriteBegin(num, SpriteX, SpriteY);
                 PtrAffGraph(SpriteX, SpriteY, num);
                 UnsetClip();
                 SetClip(ScreenXMin, ScreenYMin, ScreenXMax, ScreenYMax);
             }
         } else {
+            DynLight_SpriteBegin(num, SpriteX, SpriteY);
             PtrAffGraph(SpriteX, SpriteY, num);
             SetClip(ScreenXMin, ScreenYMin, ScreenXMax, ScreenYMax);
         }
@@ -5131,6 +5133,12 @@ S32 AffOneObject(T_SORT *pt) {
         if (ClipXMin <= ClipXMax
                             AND ClipYMin <= ClipYMax) {
             ptrobj->WorkFlags |= WAS_DRAWN;
+
+            DynLight_SpriteEnd(ptrobj->Obj.X + (ptrobj->XMin + ptrobj->XMax) / 2,
+                               ptrobj->Obj.Y + (ptrobj->YMin + ptrobj->YMax) / 2,
+                               ptrobj->Obj.Z + (ptrobj->ZMin + ptrobj->ZMax) / 2,
+                               (ptrobj->Flags & OBJ_BACKGROUND)
+                                   AND((FlagFlip == AFF_ALL_FLIP) OR(FlagFlip == AFF_ALL_NO_FLIP)));
 
             if (ptrobj->Flags & SPRITE_CLIP) {
                 DrawRecover3(ptrobj->Obj.LastAnimStepX,

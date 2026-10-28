@@ -2723,6 +2723,115 @@ void DynLight_BodyBackground(S32 background) {
     s_bodyBackground = background;
 }
 
+/* A sprite actor (OBJECT.CPP's TYPE_OBJ_SPRITE): the frame under its box is
+   kept before it is drawn, and its pixels, those the draw changed, take the
+   light at its middle, as a body would, but flat: a sprite faces the eye,
+   not the light (DYN_SPRITE_FACING). */
+#define DYN_SPRITE_FACING 192 /* 256ths of the light a face toward it takes */
+static U8 *s_sprSnap = NULL;
+static size_t s_sprSnapSize = 0;
+static T_DYN_BOX s_sprBox = {0, 0, -1, -1};
+
+void DynLight_SpriteBegin(S32 num, S32 x, S32 y) {
+    const U8 *bank, *spr;
+    S32 x0, y0, x1, y1, row;
+    size_t need;
+    s_sprBox.x1 = s_sprBox.x0 - 1;
+    if (!DynLight || ObjLightHook == NULL || num < 0 || DynLight_GlowSprite(num)) /* a glow is its own light */
+        return;
+    bank = (const U8 *)HQR_Get(num >= 100 ? HQRPtrSprite : HQRPtrSpriteRaw, num); /* as PtrAffGraph is about to */
+    if (bank == NULL)
+        return;
+    spr = bank + ReadLE_U32(bank);
+    if (num >= 100) { /* AffGraph */
+        x0 = x + (S8)spr[2];
+        y0 = y + (S8)spr[3];
+        x1 = x0 + spr[0] - 1;
+        y1 = y0 + spr[1] - 1;
+    } else { /* ScaleSprite, by ScaleFactorSprite */
+        x0 = x + (((S8)spr[2] * ScaleFactorSprite) >> 16) - 1;
+        y0 = y + (((S8)spr[3] * ScaleFactorSprite) >> 16) - 1;
+        x1 = x0 + ((spr[0] * ScaleFactorSprite) >> 16) + 2;
+        y1 = y0 + ((spr[1] * ScaleFactorSprite) >> 16) + 2;
+    }
+    x0 = x0 < 0 ? 0 : x0;
+    y0 = y0 < 0 ? 0 : y0;
+    x1 = x1 > (S32)ModeDesiredX - 1 ? (S32)ModeDesiredX - 1 : x1;
+    y1 = y1 > (S32)ModeDesiredY - 1 ? (S32)ModeDesiredY - 1 : y1;
+    if (x0 > x1 || y0 > y1)
+        return;
+    need = (size_t)(x1 - x0 + 1) * (size_t)(y1 - y0 + 1);
+    if (need > s_sprSnapSize) {
+        U8 *p = (U8 *)realloc(s_sprSnap, need);
+        if (p == NULL)
+            return;
+        s_sprSnap = p;
+        s_sprSnapSize = need;
+    }
+    for (row = y0; row <= y1; row++)
+        memcpy(s_sprSnap + (size_t)(row - y0) * (size_t)(x1 - x0 + 1), (const U8 *)Log + TabOffLine[row] + x0,
+               (size_t)(x1 - x0 + 1));
+    s_sprBox.x0 = x0;
+    s_sprBox.y0 = y0;
+    s_sprBox.x1 = x1;
+    s_sprBox.y1 = y1;
+}
+
+void DynLight_SpriteEnd(S32 wx, S32 wy, S32 wz, S32 background) {
+    const S32 nbLights = background ? s_nbBodyStatic : s_nbBody;
+    const S32 pitch = s_sprBox.x1 - s_sprBox.x0 + 1;
+    float px, py, pz, sum = 0.0f;
+    T_DYN_BOX b = s_sprBox;
+    S32 k, x, y, v;
+    if (DynLight_BoxEmpty(&s_sprBox))
+        return;
+    s_sprBox.x1 = s_sprBox.x0 - 1;
+    if (!DynLight || ObjLightHook == NULL || !nbLights || !DynLight_Surf())
+        return;
+    if (s_iso) { /* the lights' space, DynLight_BodyFrom */
+        px = (float)(wx - CameraXr);
+        py = (float)(wy - CameraYr);
+        pz = (float)(wz - CameraZr);
+    } else {
+        T_DYN_LIGHT c;
+        DynLight_ToCam(wx, wy, wz, &c);
+        px = c.x;
+        py = c.y;
+        pz = -c.z;
+    }
+    for (k = 0; k < nbLights; k++) {
+        const float dx = s_body[k].x - px, dy = s_body[k].y - py, dz = s_body[k].z - pz;
+        const float d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < s_body[k].r2)
+            sum += (float)DynLight_FalloffF(d2, 1.0f / s_body[k].r2, s_body[k].level);
+    }
+    v = (S32)(sum * (float)DYN_SPRITE_FACING / 256.0f);
+    if (v <= 0)
+        return;
+    if (v > 255)
+        v = 255;
+    /* the pixels the draw left, in the clip it drew in */
+    b.x0 = b.x0 > ClipXMin ? b.x0 : ClipXMin;
+    b.y0 = b.y0 > ClipYMin ? b.y0 : ClipYMin;
+    b.x1 = b.x1 < ClipXMax ? b.x1 : ClipXMax;
+    b.y1 = b.y1 < ClipYMax ? b.y1 : ClipYMax;
+    for (y = b.y0; y <= b.y1; y++) {
+        U8 *d = (U8 *)Log + TabOffLine[y];
+        const U8 *was = s_sprSnap + (size_t)(y - s_sprBox.y0) * (size_t)pitch - s_sprBox.x0;
+        const U8 *bayer = DynLightBayer + ((y & 3) << 2);
+        for (x = b.x0; x <= b.x1; x++) {
+            S32 lvl;
+            if (d[x] == was[x] || !d[x])
+                continue;
+            lvl = (v + bayer[x & 3]) >> 4;
+            if (lvl > 15)
+                lvl = 15;
+            if (lvl)
+                d[x] = s_surf[(lvl << 8) | d[x]];
+        }
+    }
+}
+
 /* ObjLightHook: the lights near the body raise the shade of each point, by
    its normal, then of each face normal, at the point of the first flat
    polygon that uses it. The body's points are rotated again here, from its
