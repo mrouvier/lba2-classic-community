@@ -12,7 +12,12 @@
 #include "../DISTRIB.H"
 #include "../FOLLOWCAM.H" // cam_* cvars and the camtrace toggle
 #include "../PLAYACF.H"
-#include "../RETAILFIX.H" // fix_* cvars
+#include "../RETAILFIX.H"  // fix_* cvars
+#include "../RAIN_SCALE.H" // gfx_rain_scale
+#include "../EXTFOV.H"     // gfx_fov
+#include "../RAIN_FX.H"    // gfx_rain_fx
+#include "../SEA_FX.H"     // gfx_sea
+#include "../DYNLIGHT.H"   // gfx_dynlight
 #include <POLYGON/POLYFILT.H>
 
 extern S32 GfxDitherShading;
@@ -332,11 +337,22 @@ static void unique_shoot_path(const char *prefix, const char *ext, T_CAPTURE_SEQ
 }
 
 static void cmd_screenshot(int argc, const char *argv[]) {
-    (void)argc;
-    (void)argv;
     static T_CAPTURE_SEQ seq = {0, 0};
     char path[ADELINE_MAX_PATH];
 
+    /* "presented": the frame as it reaches the window, after the present-time
+       stages (the lighting's colour), written as a PPM by the console's
+       pre-present hook. Otherwise the game's indexed frame as a PNG. */
+    if (argc > 1 && !strcmp(argv[1], "presented")) {
+        unique_shoot_path("shot", "ppm", &seq, path, ADELINE_MAX_PATH);
+        Console_RequestScreenshot(path, 0);
+        Console_Print("Screenshot as presented (no console): %s", path);
+        return;
+    }
+    if (argc > 1) {
+        Console_Print("Usage: screenshot [presented]");
+        return;
+    }
     unique_shoot_path("shot", "png", &seq, path, ADELINE_MAX_PATH);
     Console_RequestScreenshot(path, 1); /* 1 = PNG via SavePNG in game */
     Console_Print("Screenshot (no console): %s", path);
@@ -639,6 +655,18 @@ static void cmd_ui_dispatch(int argc, const char *argv[]) {
                       (int)Menu_CaptureMatchesPresented());
         return;
     }
+    if (argc >= 3 && !strcmp(argv[1], "menu-graphics")) {
+        /* The Graphics submenu, opened from the options menu. Same black-bg
+           convention as `display`. */
+        if (Console_GetCaptureBlackBg()) {
+            memset(Log, 0, (size_t)ModeDesiredX * (size_t)ModeDesiredY);
+            memset(Screen, 0, (size_t)ModeDesiredX * (size_t)ModeDesiredY);
+        }
+        Graphics_MainCapture(argv[2]);
+        Console_Print("ui menu-graphics -> %s (presented_matches_rendered=%d)", argv[2],
+                      (int)Menu_CaptureMatchesPresented());
+        return;
+    }
     if (argc >= 3 && !strcmp(argv[1], "resolution")) {
         /* Resolution sub-page (the list opened from the Display submenu's
            Resolution row). Built at runtime, so Resolution_MainCapture
@@ -820,6 +848,7 @@ static void cmd_ui_dispatch(int argc, const char *argv[]) {
     Console_Print("       ui [--black-bg] dialog <text-id> <path>");
     Console_Print("       ui [--black-bg] menu-options <path>");
     Console_Print("       ui [--black-bg] menu-advanced <path>");
+    Console_Print("       ui [--black-bg] menu-graphics <path>");
     Console_Print("       ui menu-main <path>");
     Console_Print("       ui menu-main-options <path>");
     Console_Print("       ui [--black-bg] display <path>");
@@ -2512,8 +2541,9 @@ void Console_RegisterAll(void) {
     Console_RegisterCommandEx("timer", cmd_timer, "Advance timer by N ms (default 200)", "timer [ms]", "Advances high-res timer.");
     Console_RegisterCommandEx("status", cmd_status, "Print island, cube, chapter, objs, FPS, pos", "(no args)",
                               "Snapshot of current game state.");
-    Console_RegisterCommandEx("screenshot", cmd_screenshot, "Save next frame as PNG (no console)", "(no args)",
-                              "PNG under shoot/; console closes first.");
+    Console_RegisterCommandEx("screenshot", cmd_screenshot, "Save next frame as PNG (no console)", "screenshot [presented]",
+                              "PNG under shoot/; console closes first. 'presented': the frame as shown, after the "
+                              "present-time stages, as a PPM.");
 #ifdef ENABLE_POLY_RECORDING
     Console_RegisterCommandEx("polyrec", cmd_polyrec, "Record the next frame's polygon draw calls",
                               "polyrec [path]",
@@ -2533,7 +2563,7 @@ void Console_RegisterAll(void) {
                               "Without a path, writes state_<time>.json under shoot/. Diffing two "
                               "dumps from one session says what changed between two moments.");
     Console_RegisterCommandEx("ui", cmd_ui, "Open a UI modal and capture a screenshot",
-                              "ui {inventory|holomap|menu-options|menu-advanced|menu-main|menu-main-options|config|slideshow} <path> | ui config-pad | ui holoplan <island> <path> | ui video <name> <path> | ui {dialog|found-object} <id> <path> | ui pcx-message <pcx-idx> <text-id> [<path>] [big|full|normal] | ui askchoice [--press <key>] <question-id> <choice-id>...",
+                              "ui {inventory|holomap|menu-options|menu-advanced|menu-graphics|menu-main|menu-main-options|config|slideshow} <path> | ui config-pad | ui holoplan <island> <path> | ui video <name> <path> | ui {dialog|found-object} <id> <path> | ui pcx-message <pcx-idx> <text-id> [<path>] [big|full|normal] | ui askchoice [--press <key>] <question-id> <choice-id>...",
                               "Composite verb for UI regression fixtures: opens a UI modal "
                               "with a deterministic auto-exit, writes the settled frame to <path> "
                               "via SavePNG, then closes.  Compose with --load / --exec to drive "
@@ -2690,6 +2720,11 @@ void Console_RegisterAll(void) {
      * registered from their settings tables, with ConfigFile_RegisterCvars. */
     FollowCam_RegisterCvars();
     RetailFix_RegisterCvars();
+    RainScale_RegisterCvars();
+    ExtFov_RegisterCvars();
+    RainFx_RegisterCvars();
+    SeaFx_RegisterCvars();
+    DynLight_RegisterCvars();
     ConfigFile_RegisterCvars();
     Audio_RegisterCvars();
 }

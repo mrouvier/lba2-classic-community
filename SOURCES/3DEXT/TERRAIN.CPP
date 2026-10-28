@@ -1,8 +1,11 @@
 #include "DEFINES.H"
 #include "../PERSO.H"
 #include "../RETAILFIX.H"
+#include "../SEA_FX.H" /* the open sea in motion: its page, its quads (DRAWSKY.CPP) */
+#include "../DYNLIGHT.H" /* the cube's street lamps, gathered with its camera in place */
 
 #include <SVGA/SCREEN.H>
+#include <POLYGON/POLYFILT.H> /* PolyTexFilterNZW: the water redraw keeps the texture filter */
 
 #define LIMITE_LOIN (60 * 1024)
 #define COLOR_LIMITE 255
@@ -830,6 +833,8 @@ void AffichageTerrainZBuf(void) {
 
     // affichage des objets du decors
     AffichageObjetDecorsZBuf();
+    /* The cube's lamps the decors left shown, while its camera is in place. */
+    DynLight_GatherCube();
 
     // calcul les coordonnées 2D de chaque points
     PickTerrainPath();
@@ -1107,6 +1112,9 @@ void DrawAnimatedPolys() {
     RepMask = 0xFFFF;
 
     Switch_Fillers(FILL_POLY_FOG_NZW);
+    /* Terrain, which the texture filter covers, through a bank objects in
+       water share and the filter does not cover (POLYFILT.H). */
+    PolyTexFilterNZW = 1;
 
     if (NbToRefresh > RefreshAniPoly)
         NbToRefresh = RefreshAniPoly;
@@ -1121,7 +1129,9 @@ void DrawAnimatedPolys() {
                             AND ClipYMin <= ClipYMax) {
             SetCLUT(ptr->Fog);
 
+            DynLight_Unlight(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
             Fill_Poly(ptr->Type, ptr->Color, 3, ptr->Tab_Points);
+            DynLight_Refreshed(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
 
             BoxStaticAdd(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
         }
@@ -1132,6 +1142,8 @@ void DrawAnimatedPolys() {
     // protec au cas ou
     if (RefreshAniPoly < 0)
         RefreshAniPoly = 0;
+
+    PolyTexFilterNZW = 0;
 
     // Met a jour Screen pour recouvrements
     BoxBlitStaticListToScreen();

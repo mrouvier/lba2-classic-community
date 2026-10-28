@@ -24,6 +24,7 @@ extern S32 GfxDitherShading;
 #include "EXIT_SCREEN.H"
 #include "PERFTRACE.H"
 #include "TOUCH_INPUT.H"
+#include "DYNLIGHT.H" /* the light stage at present time */
 #include <SYSTEM/CUE.H>
 #include <SYSTEM/DISCIMG.H>
 #include <SYSTEM/LOG.H>
@@ -38,6 +39,7 @@ extern S32 GfxDitherShading;
 #include <SYSTEM/KEYBOARD_KEYS.H>
 #include "FOLLOWCAM.H"
 #include "FOLLOWCAM_CFG.H" /* the *_DEFAULT tunables, read and written by the cfg below */
+#include "EXTFOV.H"        /* ExtFov_Margin: the off-screen snap's margins under the view lock */
 #include "BOOT_EXIT.H"
 #include "UI_LAYOUT.H" /* UI_VCENTER_OFS */
 #include "MOUSE_CAPTURE.H"
@@ -633,6 +635,10 @@ restartloop:
             Input |= Control_InputCurrentMask();
             Control_InputFrameTick();
         }
+
+        /* A change to the exterior view's lock made from the console or the
+           menu sets the projection here, outside any modal (EXTFOV.CPP). */
+        ExtFov_ApplyPending();
 
         ManageTime();
 
@@ -1980,8 +1986,16 @@ restartloop:
                  * (80/539 preserved); at wider widths it stops firing while
                  * the hero is still well inside the right half of the screen,
                  * which is most visible in iso scenes (iso centre shifts with
-                 * ModeDesiredX, so hero screen-X tracked the static 539). */
-                if ((Xp<(ClipWindowXMin + 80) OR Xp>(ClipWindowXMax - 100) OR Yp<(80 + ClipWindowYMin) OR Yp>(ClipWindowYMax - 50))
+                 * ModeDesiredX, so hero screen-X tracked the static 539).
+                 *
+                 * The margins are 1997 pixels. Under the exterior view lock a
+                 * world distance is more of this frame's pixels, so they follow
+                 * the focal and the snap fires at the original distance from
+                 * the edge (EXTFOV.H); an interior keeps them as they are. */
+                S32 ext = (CubeMode == CUBE_EXTERIEUR);
+                S32 mx0 = ExtFov_Margin(80, ext), mx1 = ExtFov_Margin(100, ext);
+                S32 my0 = ExtFov_Margin(80, ext), my1 = ExtFov_Margin(50, ext);
+                if ((Xp<(ClipWindowXMin + mx0) OR Xp>(ClipWindowXMax - mx1) OR Yp<(my0 + ClipWindowYMin) OR Yp>(ClipWindowYMax - my1))
                         AND !(FollowCamera AND CubeMode == CUBE_EXTERIEUR)) {
                     SaveTimer();
 
@@ -2558,6 +2572,9 @@ int Lba2Main(int argc, char *argv[]) {
 
     /* Console hooks: keyboard toggle/input interception + final-frame overlay compositing. */
     SetEventFilter(Console_FeedEvent);
+    /* The light stage first: the console and the touch pad draw over it. It
+       returns at once unless the lighting is at its colour level. */
+    SetPresentLightCallback(DynLight_PresentStage);
     SetPrePresentCallback(ControlPrePresent);
 
     /* Touch virtual gamepad (Android / mobile). Init before Perftrace so

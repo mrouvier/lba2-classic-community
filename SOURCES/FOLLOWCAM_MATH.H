@@ -202,8 +202,10 @@ static inline S32 FollowCamBlendAngle(S32 from, S32 to, S32 weight) {
     return (from + (S32)((S64)FollowCamAngleDiff(to & 4095, from & 4095) * weight / 1000)) & 4095;
 }
 
-/* HD recompose strength: the hundredths by which the render height exceeds the
- * 480 the game was composed for. 0 at 480, 125 at 1080.
+/* HD recompose strength: the hundredths by which the view height it is given
+ * (the frame's, or 480 under the exterior view lock, which the caller in
+ * FOLLOWCAM.CPP decides) exceeds the 480 the game was composed for. 0 at 480,
+ * 125 at 1080.
  *
  * The apply path scales its boom pull-in, pitch steepen and forward-lean cut by
  * this, so the whole recompose is an exact no-op wherever this returns 0. Two
