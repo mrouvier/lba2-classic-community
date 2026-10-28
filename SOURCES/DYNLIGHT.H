@@ -465,6 +465,301 @@ static inline S32 DynLight_IsoT3(S32 u, S32 v, S32 *face) {
     return side;
 }
 
+/* A brick that does not fill its cell (a bench, a table, a rail, a floor
+   tile), or a cell cut by a slope or a stair (its collision shape, 2..13):
+   the surface its pixels show. DynLight_IsoFitBrick fits a box to the
+   brick's opaque pixels, by their extremes along the three directions that
+   bound an isometric box's outline: u, 2v + u and 2v - u. A box's six
+   extremes have five free values (it slides along the view, (5, 4, 5),
+   without its outline changing), so the box stands on its cell's floor,
+   then slides to the deepest place inside the cell; an outline edge held by
+   no more than DYN_ISO_WEAK pixels is a corner, the face beyond it not
+   drawn, and is loosened until the six extremes are a box's. A sprite drawn
+   inside one face of its cell is that face (a floor tile thinner than
+   DYN_ISO_THIN, a wall's side), and a plane within DYN_ISO_SNAP of the
+   cell's is the cell's. Only the box's near planes (x1, y1, z1, cell-local)
+   meet the eye, so they are what is kept. A whole brick keeps the whole
+   cell, (512, 256, 512), and today's DynLight_IsoT3 exactly. */
+#define DYN_ISO_S2 3     /* the slope faces of collision shapes 2..5, faces 3..6 */
+#define DYN_ISO_EPS 1e-6 /* planes that meet on a pixel's ray: a tie, whatever the rounding */
+#define DYN_ISO_WEAK 3
+#define DYN_ISO_THIN 96.0
+#define DYN_ISO_SNAP 32.0
+typedef struct {
+    double x1, y1, z1; /* the near planes, cell-local */
+    S32 col;           /* the cell's collision shape: 1 a box, 2..13 a slope or a corner */
+} T_DYN_ISO_SURF;
+
+/* The six extremes of a brick's opaque pixels (pu[i], pv[i]): u, 2v + u and
+   2v - u, least then greatest. */
+static inline void DynLight_IsoExtremes(const U8 *pu, const U8 *pv, S32 n, S32 *ex) {
+    S32 i;
+    ex[0] = ex[2] = ex[4] = 0x7FFFFFFF;
+    ex[1] = ex[3] = ex[5] = -0x7FFFFFFF;
+    for (i = 0; i < n; i++) {
+        const S32 u = pu[i], P = 2 * pv[i] + pu[i], Q = 2 * pv[i] - pu[i];
+        if (u < ex[0])
+            ex[0] = u;
+        if (u > ex[1])
+            ex[1] = u;
+        if (P < ex[2])
+            ex[2] = P;
+        if (P > ex[3])
+            ex[3] = P;
+        if (Q < ex[4])
+            ex[4] = Q;
+        if (Q > ex[5])
+            ex[5] = Q;
+    }
+}
+
+/* How many pixels hold each extreme, within one level: a real edge has
+   many, a corner few. */
+static inline void DynLight_IsoSupports(const U8 *pu, const U8 *pv, S32 n, const S32 *ex, S32 *sup) {
+    S32 i;
+    for (i = 0; i < 6; i++)
+        sup[i] = 0;
+    for (i = 0; i < n; i++) {
+        const S32 u = pu[i], P = 2 * pv[i] + pu[i], Q = 2 * pv[i] - pu[i];
+        sup[0] += u <= ex[0] + 1;
+        sup[1] += u >= ex[1] - 1;
+        sup[2] += P <= ex[2] + 1;
+        sup[3] += P >= ex[3] - 1;
+        sup[4] += Q <= ex[4] + 1;
+        sup[5] += Q >= ex[5] - 1;
+    }
+}
+
+static inline void DynLight_IsoFitBrick(const U8 *pu, const U8 *pv, S32 n, S32 col, T_DYN_ISO_SURF *s) {
+    static const S32 cellExt[6] = {0, 47, 22, 99, -25, 52}; /* the whole cell's extremes */
+    static const double cell[3] = {512.0, 256.0, 512.0};
+    S32 ex[6], e[6], sup[6], sup0[6], faces = 0, i, k;
+    double a1, a2, b1, b2, g1, g2, bx[6], klo, khi, kk;
+    s->x1 = 512.0;
+    s->y1 = 256.0;
+    s->z1 = 512.0;
+    s->col = col;
+    if (col >= 2 || n <= 0) /* a slope keeps the cell's box, cut by its planes */
+        return;
+    for (i = 0; i < n; i++) {
+        S32 f;
+        DynLight_IsoT3(pu[i], pv[i], &f);
+        faces |= 1 << f;
+    }
+    DynLight_IsoExtremes(pu, pv, n, ex);
+    DynLight_IsoSupports(pu, pv, n, ex, sup0);
+
+    /* Loosen, never tighten, the least held edge until the six extremes are
+       a box's: 2(uL + uH) = PL + PH - QL - QH, give or take a level. */
+    for (i = 0; i < 6; i++) {
+        e[i] = ex[i];
+        sup[i] = sup0[i];
+    }
+    for (k = 0; k < 6; k++) {
+        const S32 r = 2 * (e[0] + e[1]) - (e[2] + e[3] - e[4] - e[5]);
+        S32 cand[3][4], nc = 0, best = -1, j;
+        if (r >= -2 && r <= 2)
+            break;
+        if (r > 0) {
+            const S32 c0[3][4] = {{sup[0], 0, -1, (r + 1) / 2}, {sup[3], 3, +1, r}, {sup[4], 4, -1, r}};
+            for (j = 0; j < 3; j++)
+                if (e[c0[j][1]] != cellExt[c0[j][1]]) {
+                    cand[nc][0] = c0[j][0], cand[nc][1] = c0[j][1], cand[nc][2] = c0[j][2], cand[nc][3] = c0[j][3];
+                    nc++;
+                }
+        } else {
+            const S32 c0[3][4] = {{sup[1], 1, +1, (1 - r) / 2}, {sup[2], 2, -1, -r}, {sup[5], 5, +1, -r}};
+            for (j = 0; j < 3; j++)
+                if (e[c0[j][1]] != cellExt[c0[j][1]]) {
+                    cand[nc][0] = c0[j][0], cand[nc][1] = c0[j][1], cand[nc][2] = c0[j][2], cand[nc][3] = c0[j][3];
+                    nc++;
+                }
+        }
+        if (!nc)
+            break;
+        for (j = 0; j < nc; j++) /* the least held, the first edge on a tie */
+            if (best < 0 || cand[j][0] < cand[best][0] ||
+                (cand[j][0] == cand[best][0] && cand[j][1] < cand[best][1]))
+                best = j;
+        {
+            const S32 idx = cand[best][1], room = cellExt[idx] > e[idx] ? cellExt[idx] - e[idx] : e[idx] - cellExt[idx];
+            e[idx] += cand[best][2] * (cand[best][3] < room ? cand[best][3] : room);
+            sup[idx] = 1 << 30;
+        }
+    }
+
+    /* The edges, half a level outside the extreme pixels; the box standing
+       on the floor. */
+    a1 = 64.0 * e[0] - 1536.0;  /* 3(x0 - z1) */
+    a2 = 64.0 * e[1] - 1472.0;  /* 3(x1 - z0) */
+    b1 = 128.0 * e[2] - 6656.0; /* 12x0 - 15y1 */
+    b2 = 128.0 * e[3] - 6528.0; /* 12x1 - 15y0 */
+    g1 = 128.0 * e[4] - 640.0;  /* 12z0 - 15y1 */
+    g2 = 128.0 * e[5] - 512.0;  /* 12z1 - 15y0 */
+    bx[1] = 0.0;
+    bx[3] = b2 / 12.0;
+    bx[5] = g2 / 12.0;
+    bx[2] = bx[3] - a2 / 3.0;
+    bx[0] = bx[5] + a1 / 3.0;
+    bx[4] = ((12.0 * bx[0] - b1) + (12.0 * bx[2] - g1)) / 30.0;
+
+    /* Slide along the view to the deepest place inside the cell; clamp what
+       still sticks out. */
+    klo = -bx[0] / 5.0;
+    if (-bx[1] / 4.0 > klo)
+        klo = -bx[1] / 4.0;
+    if (-bx[2] / 5.0 > klo)
+        klo = -bx[2] / 5.0;
+    khi = (512.0 - bx[3]) / 5.0;
+    if ((256.0 - bx[4]) / 4.0 < khi)
+        khi = (256.0 - bx[4]) / 4.0;
+    if ((512.0 - bx[5]) / 5.0 < khi)
+        khi = (512.0 - bx[5]) / 5.0;
+    kk = klo <= khi ? klo : 0.5 * (klo + khi);
+    for (i = 0; i < 6; i++) {
+        const double v = bx[i] + kk * (i % 3 == 1 ? 4.0 : 5.0);
+        bx[i] = v < 0.0 ? 0.0 : (v > cell[i % 3] ? cell[i % 3] : v);
+    }
+    for (i = 0; i < 3; i++)
+        if (bx[i] > bx[i + 3])
+            bx[i] = bx[i + 3] = 0.5 * (bx[i] + bx[i + 3]);
+    for (i = 0; i < 3; i++) { /* snap to the cell's planes */
+        if (bx[i] < DYN_ISO_SNAP)
+            bx[i] = 0.0;
+        if (bx[i + 3] > cell[i] - DYN_ISO_SNAP)
+            bx[i + 3] = cell[i];
+    }
+
+    /* A sprite inside one face of its cell is that face; a box face whose two
+       outline edges are corners is not drawn, and the box goes on into the
+       next cell. */
+    if ((faces == (1 << DYN_ISO_TOP) && bx[4] - bx[1] < DYN_ISO_THIN) ||
+        ((faces == (1 << DYN_ISO_PX) || faces == (1 << DYN_ISO_PZ)) &&
+         !(sup0[2] > DYN_ISO_WEAK && sup0[4] > DYN_ISO_WEAK)))
+        return;
+    if (sup0[2] <= DYN_ISO_WEAK && sup0[4] <= DYN_ISO_WEAK)
+        bx[4] = 256.0;
+    if (sup0[1] <= DYN_ISO_WEAK && sup0[3] <= DYN_ISO_WEAK)
+        bx[3] = 512.0;
+    if (sup0[0] <= DYN_ISO_WEAK && sup0[5] <= DYN_ISO_WEAK)
+        bx[5] = 512.0;
+    s->x1 = bx[3];
+    s->y1 = bx[4];
+    s->z1 = bx[5];
+}
+
+/* Where a pixel's ray (d = 3(x - z), b = 6(x + z) - 15y, cell-local) meets a
+   slope plane of collision shape 2..5, in T3 (ReajustPos's heights). */
+static inline double DynLight_IsoSlopeT3(S32 col, double d, double b) {
+    switch (col) {
+    case 2:
+        return (4.0 * b + 5.0 * d) / 3.0;
+    case 3:
+        return (4.0 * b - 5.0 * d) / 3.0;
+    case 4:
+        return (15360.0 + 4.0 * b + 5.0 * d) / 13.0;
+    default:
+        return (15360.0 + 4.0 * b - 5.0 * d) / 13.0;
+    }
+}
+
+/* The whole cell cut by the planes of shapes `pa` and `pb` (0 for none): where
+   the ray enters, its face, and whether it meets the solid at all. */
+static inline double DynLight_IsoWedge(double d, double b, S32 pa, S32 pb, S32 *face, S32 *hit) {
+    const double tx = 3072.0 - d, tz = 3072.0 + d, ty = (b + 3840.0) / 2.0;
+    const double lo = (d < 0 ? -d : d) > b / 2.0 ? (d < 0 ? -d : d) : b / 2.0;
+    double t;
+    S32 f, k;
+    if (ty <= tx + DYN_ISO_EPS && ty <= tz + DYN_ISO_EPS)
+        t = ty, f = DYN_ISO_TOP;
+    else if (tx <= tz + DYN_ISO_EPS)
+        t = tx, f = DYN_ISO_PX;
+    else
+        t = tz, f = DYN_ISO_PZ;
+    for (k = 0; k < 2; k++) {
+        const S32 c = k ? pb : pa;
+        double ts;
+        if (!c)
+            continue;
+        ts = DynLight_IsoSlopeT3(c, d, b);
+        if (ts < t - DYN_ISO_EPS)
+            t = ts, f = DYN_ISO_S2 + c - 2;
+    }
+    *face = f;
+    *hit = lo <= t + DYN_ISO_EPS;
+    return t;
+}
+
+/* T3 and the face of pixel (u, v) of a brick of surface `s`: the fitted box's
+   near planes, or the cell cut by its slope; the corners 6..9 are the union of
+   two slopes, 10..13 their intersection (ReajustPos). A ray that misses the
+   surface keeps the whole cell's (DynLight_IsoT3). */
+static inline double DynLight_IsoSurfT3(S32 u, S32 v, const T_DYN_ISO_SURF *s, S32 *face) {
+    static const S8 corner[14][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 2, 3}, {1, 4, 5}, {1, 2, 4}, {1, 3, 5}, /* the larger of two */
+                                     {2, 2, 3},
+                                     {2, 4, 5},
+                                     {2, 2, 4},
+                                     {2, 3, 5}}; /* both planes at once */
+    const double d = 64.0 * u - 1504.0, b = 256.0 * (v - 14);
+    const double lo = (d < 0 ? -d : d) > b / 2.0 ? (d < 0 ? -d : d) : b / 2.0;
+    double t;
+    S32 f, hit;
+    if (s->col >= 2 && s->col <= 5)
+        t = DynLight_IsoWedge(d, b, s->col, 0, &f, &hit);
+    else if (s->col >= 6 && s->col <= 13 && corner[s->col][0] == 2)
+        t = DynLight_IsoWedge(d, b, corner[s->col][1], corner[s->col][2], &f, &hit);
+    else if (s->col >= 6 && s->col <= 13) {
+        S32 fa, fb, ha, hb;
+        const double ta = DynLight_IsoWedge(d, b, corner[s->col][1], 0, &fa, &ha);
+        const double tb = DynLight_IsoWedge(d, b, corner[s->col][2], 0, &fb, &hb);
+        /* the hits, the larger; with none, the larger and no hit */
+        const S32 aFirst = ta > tb + DYN_ISO_EPS || (ta >= tb - DYN_ISO_EPS && fa >= fb);
+        if (ha && (!hb || aFirst))
+            t = ta, f = fa, hit = 1;
+        else if (hb)
+            t = tb, f = fb, hit = 1;
+        else if (aFirst)
+            t = ta, f = fa, hit = 0;
+        else
+            t = tb, f = fb, hit = 0;
+    } else {
+        const double tx = 6.0 * s->x1 - d, tz = 6.0 * s->z1 + d, ty = (b + 15.0 * s->y1) / 2.0;
+        if (ty <= tx + DYN_ISO_EPS && ty <= tz + DYN_ISO_EPS)
+            t = ty, f = DYN_ISO_TOP;
+        else if (tx <= tz + DYN_ISO_EPS)
+            t = tx, f = DYN_ISO_PX;
+        else
+            t = tz, f = DYN_ISO_PZ;
+        hit = t >= lo - DYN_ISO_EPS;
+    }
+    if (!hit)
+        t = (double)DynLight_IsoT3(u, v, &f);
+    *face = f;
+    return t;
+}
+
+/* The normal of a face, dotted with a vector (dx, dy, dz): the top, +x, +z,
+   and the slopes of shapes 2..5, (-1, 2, 0), (0, 2, -1), (0, 2, 1) and
+   (1, 2, 0) over sqrt(5). */
+static inline float DynLight_IsoDot(S32 face, float dx, float dy, float dz) {
+    switch (face) {
+    case DYN_ISO_TOP:
+        return dy;
+    case DYN_ISO_PX:
+        return dx;
+    case DYN_ISO_PZ:
+        return dz;
+    case DYN_ISO_S2:
+        return (2.0f * dy - dx) * 0.4472136f;
+    case DYN_ISO_S2 + 1:
+        return (2.0f * dy - dz) * 0.4472136f;
+    case DYN_ISO_S2 + 2:
+        return (2.0f * dy + dz) * 0.4472136f;
+    default:
+        return (2.0f * dy + dx) * 0.4472136f;
+    }
+}
+
 /* What a background pixel keeps of its point: (X + Z) / 2, rounded, which
    fits 16 bits (X and Z run 0..32768). */
 static inline U16 DynLight_IsoS2(S32 cx, S32 cz, S32 t3) {

@@ -108,7 +108,7 @@ static S32 s_tintStaticValid = 0;
    drawn, with the camera and the centre they were drawn with. */
 static S32 s_iso = 0;         /* this frame lights an interior */
 static U16 *s_isoS = NULL;    /* (X + Z) / 2, DYN_ISO_NONE where no brick shows */
-static U8 *s_isoF = NULL;     /* the face, DYN_ISO_TOP.. */
+static U8 *s_isoF = NULL;     /* the face: the top, +x, +z or a slope (DynLight_IsoDot) */
 static float *s_isoD = NULL;  /* X - Z of each column's pixels */
 static S32 s_isoValid = 0;    /* the frame's background is the one described */
 static S32 s_isoBuilding = 0; /* between DynLight_IsoBegin and DynLight_IsoEnd */
@@ -1104,24 +1104,94 @@ void DynLight_Baking(S32 x0, S32 y0, S32 x1, S32 y1) {
     Interiors
  *══════════════════════════════════════════════════════════════════════════*/
 
-/* The face and the depth of each pixel of a brick's 48 x 38 box
-   (DynLight_IsoT3), whatever the brick, the camera and the resolution: the
-   depth as its part of DynLight_IsoS2, (T3 + 3) / 6, to which a cell adds
-   256(cx + cz) (1536 is 6 x 256). */
-static U16 s_isoT6[DYN_ISO_H][DYN_ISO_W];
-static U8 s_isoFaceOf[DYN_ISO_H][DYN_ISO_W];
-static S32 s_isoTables = 0;
+/* The surfaces a room's bricks show (DynLight_IsoFitBrick,
+   DynLight_IsoSurfT3): per surface, each pixel's part of DynLight_IsoS2,
+   (T3 + 3) / 6, to which a cell adds 256(cx + cz) (1536 is 6 x 256), and its
+   face; the first is the whole cell, which every whole brick shows. A brick's
+   surface is found from its mask the first time it is drawn after
+   DynLight_IsoBegin (the bank LoadUsedBrick builds changes with the room),
+   and bricks of one surface share its table; past DYN_ISO_SURFS a brick shows
+   the whole cell. */
+#define DYN_ISO_SURFS 64
+#define DYN_ISO_BANK 2048      /* the bricks a room's bank holds at most (821 in the game) */
+#define DYN_ISO_HEADER_BLOCK 3 /* a block's dx, dy, dz before its cells (GRILLE.CPP's HEADER_BLOCK) */
+static U16 s_isoT6[DYN_ISO_SURFS][DYN_ISO_H][DYN_ISO_W];
+static U8 s_isoFaceOf[DYN_ISO_SURFS][DYN_ISO_H][DYN_ISO_W];
+static T_DYN_ISO_SURF s_isoSurf[DYN_ISO_SURFS];
+static S32 s_nbIsoSurf = 0;
+static U8 s_isoBrickSurf[DYN_ISO_BANK]; /* a brick's surface + 1, 0 until it is drawn */
+static U8 s_isoPu[DYN_ISO_W * DYN_ISO_H], s_isoPv[DYN_ISO_W * DYN_ISO_H];
 
-static void DynLight_IsoTables(void) {
+static void DynLight_IsoBuildSurf(S32 k, const T_DYN_ISO_SURF *surf) {
     S32 u, v, face;
-    if (s_isoTables)
-        return;
     for (v = 0; v < DYN_ISO_H; v++)
         for (u = 0; u < DYN_ISO_W; u++) {
-            s_isoT6[v][u] = (U16)((DynLight_IsoT3(u, v, &face) + 3) / 6);
-            s_isoFaceOf[v][u] = (U8)face;
+            const double t = DynLight_IsoSurfT3(u, v, surf, &face);
+            s_isoT6[k][v][u] = (U16)((t + 3.0) / 6.0);
+            s_isoFaceOf[k][v][u] = (U8)face;
         }
-    s_isoTables = 1;
+    s_isoSurf[k] = *surf;
+}
+
+static void DynLight_IsoResetSurfs(void) {
+    if (!s_nbIsoSurf) { /* the whole cell's, once */
+        T_DYN_ISO_SURF full;
+        full.x1 = 512.0;
+        full.y1 = 256.0;
+        full.z1 = 512.0;
+        full.col = 1;
+        DynLight_IsoBuildSurf(0, &full);
+    }
+    s_nbIsoSurf = 1;
+    memset(s_isoBrickSurf, 0, sizeof(s_isoBrickSurf));
+}
+
+/* The surface brick `brick` shows in a cell of collision shape `col`, from its
+   mask (the CopyMask layout: per row a count, then runs to skip and to write,
+   the first a skip). Every brick of the game stands in cells of one shape. */
+static S32 DynLight_IsoBrickSurf(S32 brick, S32 col, const U8 *mask) {
+    T_DYN_ISO_SURF surf;
+    S32 dy, hx, hy, r, n = 0, k;
+    if (brick >= DYN_ISO_BANK)
+        return 0;
+    if (s_isoBrickSurf[brick])
+        return s_isoBrickSurf[brick] - 1;
+    dy = mask[1];
+    hx = mask[2];
+    hy = mask[3];
+    mask += 4;
+    for (r = 0; r < dy; r++) {
+        S32 cnt = *mask++, u = hx;
+        while (cnt > 0) {
+            S32 run;
+            u += *mask++;
+            if (--cnt == 0)
+                break;
+            run = *mask++;
+            cnt--;
+            for (; run > 0; run--, u++)
+                if (u < DYN_ISO_W && hy + r < DYN_ISO_H) {
+                    s_isoPu[n] = (U8)u;
+                    s_isoPv[n] = (U8)(hy + r);
+                    n++;
+                }
+        }
+    }
+    DynLight_IsoFitBrick(s_isoPu, s_isoPv, n, col, &surf);
+    if (surf.col < 2 || surf.col > 13)
+        surf.col = 1; /* DynLight_IsoSurfT3 draws every other shape as a box */
+    for (k = 0; k < s_nbIsoSurf; k++)
+        if (s_isoSurf[k].x1 == surf.x1 && s_isoSurf[k].y1 == surf.y1 && s_isoSurf[k].z1 == surf.z1 &&
+            s_isoSurf[k].col == surf.col)
+            break;
+    if (k == s_nbIsoSurf) {
+        if (s_nbIsoSurf < DYN_ISO_SURFS)
+            DynLight_IsoBuildSurf(s_nbIsoSurf++, &surf);
+        else
+            k = 0;
+    }
+    s_isoBrickSurf[brick] = (U8)(k + 1);
+    return k;
 }
 
 /* GrilleBrickDrawn while the room is drawn: the brick's opaque pixels, read
@@ -1130,17 +1200,21 @@ static void DynLight_IsoTables(void) {
    bricks come in the painter's order, so each pixel ends with the brick
    that shows there. */
 static void DynLight_IsoBrick(S32 brick, S32 xs, S32 ys, S32 x, S32 y, S32 z) {
-    const U8 *m;
-    S32 dy, hx, hy, r, base, x0, x1;
+    const U8 *m, *cell;
+    S32 dy, hx, hy, r, base, x0, x1, col = 1, k;
     const S32 cy0 = ClipYMin, cy1 = ClipYMax;
-    (void)y;
     if (!s_isoBuilding || BufferMaskBrick == NULL || brick < 0)
         return;
     base = 256 * (x + z);
+    /* The cell's collision shape, as WorldColBrick reads it. */
+    cell = BufCube + x * SIZE_CUBE_Y * 2 + y * 2 + z * SIZE_CUBE_X * SIZE_CUBE_Y * 2;
+    if (cell[0])
+        col = GetAdrBlock(cell[0] - 1)[DYN_ISO_HEADER_BLOCK + 4 * cell[1]];
     /* The columns a pixel may take: the clip AffGraph drew in, and the box. */
     x0 = ClipXMin > xs ? ClipXMin : xs;
     x1 = ClipXMax < xs + DYN_ISO_W - 1 ? ClipXMax : xs + DYN_ISO_W - 1;
     m = BufferMaskBrick + ((const U32 *)BufferMaskBrick)[brick];
+    k = DynLight_IsoBrickSurf(brick, col, m);
     dy = m[1];
     hx = m[2];
     hy = m[3];
@@ -1150,8 +1224,8 @@ static void DynLight_IsoBrick(S32 brick, S32 xs, S32 ys, S32 x, S32 y, S32 z) {
         const S32 rowIn = py >= cy0 && py <= cy1 && v >= 0 && v < DYN_ISO_H;
         U16 *ps = rowIn ? s_isoS + TabOffLine[py] : NULL;
         U8 *pf = rowIn ? s_isoF + TabOffLine[py] : NULL;
-        const U16 *t6 = rowIn ? s_isoT6[v] : NULL;
-        const U8 *fc = rowIn ? s_isoFaceOf[v] : NULL;
+        const U16 *t6 = rowIn ? s_isoT6[k][v] : NULL;
+        const U8 *fc = rowIn ? s_isoFaceOf[k][v] : NULL;
         S32 n = *m++, px = xs + hx;
         while (n > 0) {
             S32 run, a, b, q;
@@ -1180,7 +1254,7 @@ void DynLight_IsoBegin(void) {
     GrilleBrickDrawn = NULL;
     if (!DynLight || CubeMode != CUBE_INTERIEUR || !DynLight_Buffers())
         return;
-    DynLight_IsoTables();
+    DynLight_IsoResetSurfs();
     for (y = 0; y < s_h; y++)
         memset(s_isoS + TabOffLine[y], 0xFF, sizeof(U16) * (size_t)s_w);
     s_isoCamX = CameraX;
@@ -1260,7 +1334,7 @@ static S32 DynLight_IsoAtLight(const T_DYN_LIGHT *l, S32 level, float r2, float 
     float dot;
     if (d2 >= r2)
         return 0;
-    dot = face == DYN_ISO_TOP ? dy : (face == DYN_ISO_PX ? dx : dz);
+    dot = DynLight_IsoDot(face, dx, dy, dz);
     return (DynLight_FalloffF(d2, inv2, level) * DynLight_IsoLambert(dot, sqrtf(d2))) >> 8;
 }
 

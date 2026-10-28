@@ -17,6 +17,7 @@
 
 #include "test_harness.h"
 
+#include <math.h>
 #include <string.h>
 
 static U8 g_map[DYN_LIGHT_GRID * DYN_LIGHT_GRID];
@@ -352,6 +353,86 @@ static void test_a_brick_shows_three_faces(void) {
     ASSERT_EQ_INT(DYN_ISO_PZ, face);
 }
 
+/* The opaque pixels of a box (x1, y1, z1) in the far corner of its cell: the
+   pixels whose ray meets it before leaving the cell. */
+static S32 iso_box_pixels(double x1, double y1, double z1, U8 *pu, U8 *pv) {
+    S32 u, v, n = 0;
+    for (v = 0; v < DYN_ISO_H; v++)
+        for (u = 0; u < DYN_ISO_W; u++) {
+            const double d = 64.0 * u - 1504.0, b = 256.0 * (v - 14);
+            const double lo = (d < 0 ? -d : d) > b / 2.0 ? (d < 0 ? -d : d) : b / 2.0;
+            double t = 6.0 * x1 - d;
+            if (6.0 * z1 + d < t)
+                t = 6.0 * z1 + d;
+            if ((b + 15.0 * y1) / 2.0 < t)
+                t = (b + 15.0 * y1) / 2.0;
+            if (t >= lo && iso_inside(u, v)) {
+                pu[n] = (U8)u;
+                pv[n] = (U8)v;
+                n++;
+            }
+        }
+    return n;
+}
+
+/* A brick that fills its cell keeps the cell's surface, pixel for pixel; a
+   slab, a bench or a table that does not is found from its outline; a slope
+   cuts the cell by its plane. */
+static void test_a_brick_shows_the_surface_it_draws(void) {
+    static U8 pu[DYN_ISO_W * DYN_ISO_H], pv[DYN_ISO_W * DYN_ISO_H];
+    static const double boxes[3][3] = {{512.0, 128.0, 512.0}, {256.0, 192.0, 384.0}, {384.0, 96.0, 192.0}};
+    T_DYN_ISO_SURF s;
+    S32 n, u, v, f0, f1, i, mismatch = 0;
+    double t;
+
+    n = iso_box_pixels(512.0, 256.0, 512.0, pu, pv);
+    ASSERT_EQ_INT(1296, n); /* 576 + 360 + 360 */
+    DynLight_IsoFitBrick(pu, pv, n, 1, &s);
+    ASSERT_TRUE(s.x1 == 512.0 && s.y1 == 256.0 && s.z1 == 512.0);
+    for (i = 0; i < n; i++) {
+        const S32 t3 = DynLight_IsoT3(pu[i], pv[i], &f0);
+        t = DynLight_IsoSurfT3(pu[i], pv[i], &s, &f1);
+        mismatch += t != (double)t3 || f1 != f0;
+    }
+    ASSERT_EQ_INT(0, mismatch);
+
+    for (i = 0; i < 3; i++) {
+        n = iso_box_pixels(boxes[i][0], boxes[i][1], boxes[i][2], pu, pv);
+        DynLight_IsoFitBrick(pu, pv, n, 1, &s);
+        ASSERT_TRUE(fabs(s.x1 - boxes[i][0]) <= 24.0);
+        ASSERT_TRUE(fabs(s.y1 - boxes[i][1]) <= 12.0);
+        ASSERT_TRUE(fabs(s.z1 - boxes[i][2]) <= 24.0);
+        /* A pixel of the box's top lies on its top. */
+        DynLight_IsoSurfT3(pu[0], pv[0], &s, &f1);
+        ASSERT_EQ_INT(DYN_ISO_TOP, f1);
+    }
+
+    /* Shape 5 falls toward +x, facing the eye: the top's middle shows its
+       plane, x + 2y = 512, deeper than the box's top and inside the cell. */
+    n = iso_box_pixels(512.0, 256.0, 512.0, pu, pv);
+    DynLight_IsoFitBrick(pu, pv, n, 5, &s);
+    ASSERT_EQ_INT(5, s.col);
+    t = DynLight_IsoSurfT3(23, 11, &s, &f1);
+    ASSERT_EQ_INT(DYN_ISO_S2 + 3, f1);
+    ASSERT_TRUE(t < (double)DynLight_IsoT3(23, 11, &f0));
+    {
+        const double d = 64.0 * 23 - 1504.0, b = 256.0 * (11 - 14);
+        const double x = (t / 3.0 + d / 3.0) / 2.0, y = (2.0 * t - b) / 15.0;
+        ASSERT_NEAR_F(512.0, x + 2.0 * y, 1e-6);
+        ASSERT_TRUE(x > 0.0 && x < 512.0 && y > 0.0 && y < 256.0);
+    }
+    ASSERT_TRUE(DynLight_IsoDot(DYN_ISO_S2 + 3, 1.0f, 0.0f, 0.0f) > 0.0f);
+    ASSERT_TRUE(DynLight_IsoDot(DYN_ISO_S2 + 3, 0.0f, 1.0f, 0.0f) > 0.0f);
+
+    /* A ray that misses the surface keeps the cell's point. */
+    for (v = 0; v < DYN_ISO_H; v++)
+        for (u = 0; u < DYN_ISO_W; u++)
+            if (iso_inside(u, v)) {
+                t = DynLight_IsoSurfT3(u, v, &s, &f1);
+                ASSERT_TRUE(t <= (double)DynLight_IsoT3(u, v, &f0) + DYN_ISO_EPS);
+            }
+}
+
 /* Every pixel of a cell's silhouette, kept and read back, lands on the face
    it shows, inside the cell, and projects back to its pixel: for cells and
    cameras all over a room, at three sizes. */
@@ -459,6 +540,7 @@ int main(void) {
     RUN_TEST(test_the_dither_rounds_a_level);
     RUN_TEST(test_the_tint_and_the_glow);
     RUN_TEST(test_a_brick_shows_three_faces);
+    RUN_TEST(test_a_brick_shows_the_surface_it_draws);
     RUN_TEST(test_a_background_pixel_reads_back_its_point);
     RUN_TEST(test_the_view_and_the_faces_take_the_light);
     RUN_TEST(test_a_body_shade_takes_the_light_it_faces);
