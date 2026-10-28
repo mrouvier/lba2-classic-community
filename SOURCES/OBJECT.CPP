@@ -7,6 +7,7 @@
 #include "RECORD.H"    /* Record_SeedHook: the boot scene load's seed on a replay */
 #include "SAVEGAME.H"
 #include "SEA_FX.H"    /* the open sea refilled between full redraws */
+#include "DYNLIGHT.H"  /* the lamps and the moving lights over the scene */
 #include "ZONE_GEOM.H" // ZonePointInBox -- single source of truth for the zone box test
 
 #include <SYSTEM/LOG.H> // cubetrace
@@ -5029,6 +5030,7 @@ S32 AffOneObject(T_SORT *pt) {
                     SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                     CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                               ClipXMin, ClipYMin, Screen);
+                    DynLight_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 }
 
                 if (DrawZVObjets) {
@@ -5156,6 +5158,7 @@ S32 AffOneObject(T_SORT *pt) {
                 SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                           ClipXMin, ClipYMin, Screen);
+                DynLight_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
             }
             if (DrawZVObjets) {
                 DrawZV(ptrobj);
@@ -5243,6 +5246,7 @@ S32 AffOneObject(T_SORT *pt) {
                 SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                           ClipXMin, ClipYMin, Screen);
+                DynLight_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
             }
             if (DrawZVObjets) {
                 DrawZV(ptrobj);
@@ -5877,6 +5881,10 @@ startaffscene:
         SetCLUT(PalLevel);
         Switch_Fillers(FILL_POLY_TEXTURES);
     }
+
+    /* The moving lights over the background the scene shows, once the scene
+       is whole and before any text is drawn over it (DYNLIGHT.H). */
+    DynLight_MovingPass();
 
     /*------------------------------------------------------------------------*/
     // special incrust disp

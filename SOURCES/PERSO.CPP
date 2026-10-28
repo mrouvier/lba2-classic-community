@@ -24,6 +24,7 @@ extern S32 GfxDitherShading;
 #include "EXIT_SCREEN.H"
 #include "PERFTRACE.H"
 #include "TOUCH_INPUT.H"
+#include "DYNLIGHT.H" /* the light stage at present time */
 #include <SYSTEM/CUE.H>
 #include <SYSTEM/DISCIMG.H>
 #include <SYSTEM/LOG.H>
@@ -2571,6 +2572,9 @@ int Lba2Main(int argc, char *argv[]) {
 
     /* Console hooks: keyboard toggle/input interception + final-frame overlay compositing. */
     SetEventFilter(Console_FeedEvent);
+    /* The light stage first: the console and the touch pad draw over it. It
+       returns at once unless the lighting is at its colour level. */
+    SetPresentLightCallback(DynLight_PresentStage);
     SetPrePresentCallback(ControlPrePresent);
 
     /* Touch virtual gamepad (Android / mobile). Init before Perftrace so

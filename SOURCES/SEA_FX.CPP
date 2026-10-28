@@ -2,6 +2,7 @@
 #include "C_EXTERN.H"      /* FirstTime: a change of look redraws the scene whole */
 #include "3DEXT/VAR_EXT.H" /* SkySeaTexture, the sea's page */
 #include "SETTINGS.H"
+#include "DYNLIGHT.H" /* the lamps light the refilled sea again */
 
 #include <POLYGON/POLY.H>     /* Fill_Poly, Switch_Fillers, PtrMap, RepMask */
 #include <POLYGON/POLYFILT.H> /* PolyTexFilterNZW: the refill keeps the texture filter */
@@ -253,6 +254,7 @@ void SeaFx_Refill(void) {
        emptied the box lists, would otherwise reach the background with the
        sea and stay. */
     CopyBlock(bx0, by0, bx1, by1, Screen, bx0, by0, Log);
+    DynLight_Unlight(bx0, by0, bx1, by1); /* the sea drawn over the background as it was before the lamps */
 
     Switch_Fillers(FILL_POLY_FOG_NZW);
     PolyTexFilterNZW = 1;
@@ -282,6 +284,7 @@ void SeaFx_Refill(void) {
             SeaFx_PutBack((U8 *)Log, (const U8 *)Screen, s_keep, s_keepPitch, x0, y0, x1, y1);
     }
 
+    DynLight_Refreshed(bx0, by0, bx1, by1);
     BoxStaticAdd(bx0, by0, bx1, by1);
     BoxBlitStaticListToScreen();
 }

@@ -107,6 +107,7 @@ S32 FlagShowEndDemo = FALSE;
 #define MENU_ID_RAIN_SCALE 2122
 #define MENU_ID_EXTERIOR_FOV 2123
 #define MENU_ID_SEA 2124
+#define MENU_ID_DYN_LIGHT 2125
 
 // Resolution sub-page rows occupy a reserved id range: row i carries id
 // MENU_ID_RESOLUTION_BASE + i, which BuildCustomMenuText and GereResolutionMenu
@@ -187,14 +188,14 @@ U16 DisplayMenu[] = {
 // Graphics submenu: the rendering options the settings tables own (the
 // rasterizer and present rows in CONFIG_FILE.CPP, the rain row in
 // RAIN_SCALE.CPP and RAIN_FX.CPP, the sea row in SEA_FX.CPP, the exterior view
-// row in EXTFOV.CPP), one cycling row each, the Dithering and Rain rows over
+// row in EXTFOV.CPP, the lighting row in DYNLIGHT.CPP), one cycling row each, the Dithering and Rain rows over
 // two settings each. Every row reads and writes its T_SETTING through the
 // table, so the range, the default and the "set this run" mark that keeps a
 // menu choice from being overwritten by a per-run environment override all
 // live in the table and nowhere here. See GereGraphicsMenu.
 U16 GraphicsMenu[] = {
     0,   // selected
-    7,   // nb entries
+    8,   // nb entries
     260, // y center
     0,   // .dia num
 
@@ -212,6 +213,8 @@ U16 GraphicsMenu[] = {
     MENU_ID_SEA,
     0,
     MENU_ID_EXTERIOR_FOV,
+    0,
+    MENU_ID_DYN_LIGHT,
 };
 
 // Resolution sub-page, opened from the Display submenu's Resolution row.
@@ -636,6 +639,15 @@ static void BuildCustomMenuText(S32 num, char *string) {
                         GetLocalizedMenuLabel(v >= 2 ? MENU_LABEL_SEA_CHOPPY
                                               : v    ? MENU_LABEL_SEA_MOVING
                                                      : MENU_LABEL_SEA_ORIGINAL));
+        break;
+    }
+
+    case MENU_ID_DYN_LIGHT: {
+        const S32 v = GraphicsSettingValue("DynLight");
+        CopyUtf8ToCp850(string, 256,
+                        GetLocalizedMenuLabel(v >= 2 ? MENU_LABEL_LIGHT_COLOUR
+                                              : v    ? MENU_LABEL_LIGHT_DYNAMIC
+                                                     : MENU_LABEL_LIGHT_ORIGINAL));
         break;
     }
 
@@ -3657,6 +3669,10 @@ S32 GereGraphicsMenu(void) {
 
         case MENU_ID_EXTERIOR_FOV:
             GraphicsSettingCycle("ExteriorFov");
+            break;
+
+        case MENU_ID_DYN_LIGHT:
+            GraphicsSettingCycle("DynLight");
             break;
         }
     }

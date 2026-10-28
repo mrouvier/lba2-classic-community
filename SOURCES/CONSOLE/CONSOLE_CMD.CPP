@@ -17,6 +17,7 @@
 #include "../EXTFOV.H"     // gfx_fov
 #include "../RAIN_FX.H"    // gfx_rain_fx
 #include "../SEA_FX.H"     // gfx_sea
+#include "../DYNLIGHT.H"   // gfx_dynlight
 #include <POLYGON/POLYFILT.H>
 
 extern S32 GfxDitherShading;
@@ -336,11 +337,22 @@ static void unique_shoot_path(const char *prefix, const char *ext, T_CAPTURE_SEQ
 }
 
 static void cmd_screenshot(int argc, const char *argv[]) {
-    (void)argc;
-    (void)argv;
     static T_CAPTURE_SEQ seq = {0, 0};
     char path[ADELINE_MAX_PATH];
 
+    /* "presented": the frame as it reaches the window, after the present-time
+       stages (the lighting's colour), written as a PPM by the console's
+       pre-present hook. Otherwise the game's indexed frame as a PNG. */
+    if (argc > 1 && !strcmp(argv[1], "presented")) {
+        unique_shoot_path("shot", "ppm", &seq, path, ADELINE_MAX_PATH);
+        Console_RequestScreenshot(path, 0);
+        Console_Print("Screenshot as presented (no console): %s", path);
+        return;
+    }
+    if (argc > 1) {
+        Console_Print("Usage: screenshot [presented]");
+        return;
+    }
     unique_shoot_path("shot", "png", &seq, path, ADELINE_MAX_PATH);
     Console_RequestScreenshot(path, 1); /* 1 = PNG via SavePNG in game */
     Console_Print("Screenshot (no console): %s", path);
@@ -2529,8 +2541,9 @@ void Console_RegisterAll(void) {
     Console_RegisterCommandEx("timer", cmd_timer, "Advance timer by N ms (default 200)", "timer [ms]", "Advances high-res timer.");
     Console_RegisterCommandEx("status", cmd_status, "Print island, cube, chapter, objs, FPS, pos", "(no args)",
                               "Snapshot of current game state.");
-    Console_RegisterCommandEx("screenshot", cmd_screenshot, "Save next frame as PNG (no console)", "(no args)",
-                              "PNG under shoot/; console closes first.");
+    Console_RegisterCommandEx("screenshot", cmd_screenshot, "Save next frame as PNG (no console)", "screenshot [presented]",
+                              "PNG under shoot/; console closes first. 'presented': the frame as shown, after the "
+                              "present-time stages, as a PPM.");
 #ifdef ENABLE_POLY_RECORDING
     Console_RegisterCommandEx("polyrec", cmd_polyrec, "Record the next frame's polygon draw calls",
                               "polyrec [path]",
@@ -2711,6 +2724,7 @@ void Console_RegisterAll(void) {
     ExtFov_RegisterCvars();
     RainFx_RegisterCvars();
     SeaFx_RegisterCvars();
+    DynLight_RegisterCvars();
     ConfigFile_RegisterCvars();
     Audio_RegisterCvars();
 }

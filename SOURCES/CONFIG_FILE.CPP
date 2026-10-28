@@ -18,6 +18,7 @@
 #include "EXTFOV.H"            /* the exterior view's setting */
 #include "RAIN_FX.H"           /* the storm's look */
 #include "SEA_FX.H"            /* the open sea in motion */
+#include "DYNLIGHT.H"          /* dynamic lighting */
 #include <PLATFORM/PLATFORM.H> /* PLATFORM_FILTER_*, and why a mode was refused */
 #include <POLYGON/POLYFILT.H>  /* PolyTexFilter / EnvTexFilter */
 #include <POLYGON/POLYTZF.H>   /* PolyFogDither */
@@ -265,6 +266,8 @@ const T_SETTING *ConfigFile_SettingTable(S32 i, S32 *count) {
         return RainFx_Settings(count);
     case 9:
         return SeaFx_Settings(count);
+    case 10:
+        return DynLight_Settings(count);
     default:
         *count = 0;
         return NULL;
@@ -411,6 +414,7 @@ void ReadConfigFile(void) {
     ExtFov_ReadConfig();
     RainFx_ReadConfig();
     SeaFx_ReadConfig();
+    DynLight_ReadConfig();
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -492,6 +496,7 @@ void WriteConfigFile(void) {
     ExtFov_WriteConfig();
     RainFx_WriteConfig();
     SeaFx_WriteConfig();
+    DynLight_WriteConfig();
 
     if (batched) {
         DefFileBufferEndBatch();

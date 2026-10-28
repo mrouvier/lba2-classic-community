@@ -1,6 +1,7 @@
 #include "DEFINES.H"
 
 #include "../DIRECTORIES.H"
+#include "../DYNLIGHT.H" /* the street lamps are found in the cubes this loads */
 
 // nom du HQR (citadele.hqr)
 
@@ -197,6 +198,9 @@ void LoadIsland() {
 
     if (!Load_HQR(islandFilePath, ObjTexture, HQR_TEX_OBJ))
         TheEndCheckFile(islandFilePath);
+
+    /* A new island: the lamps found in the last one's cubes go. */
+    DynLight_IslandLoaded();
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -259,6 +263,9 @@ S32 LoadCube(S32 x, S32 y) {
 
     MapIntensity = (U8 *)HQR_Get(HQR_MapIntensity, index + HQR_CUBE_LUM);
 
+    /* The cube these tables are, whose lamps the light finds when it draws. */
+    DynLight_CubeLoaded((index - HQR_START_CUBE) / HQR_STEP_CUBE);
+
     return TRUE;
 }
 
@@ -295,4 +302,7 @@ void InitSeaCube(void) {
     }
 
     CubeBitField = 0xFFFF;
+
+    /* The open sea: no cube, no lamp. */
+    DynLight_CubeLoaded(-1);
 }

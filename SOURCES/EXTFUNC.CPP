@@ -9,6 +9,7 @@
 
 #include "C_EXTERN.H"
 #include "SEA_FX.H" /* SeaFx_FrameBegin: the sea kept from each full redraw */
+#include "DYNLIGHT.H" /* the street lamps baked into the background */
 #include "DIRECTORIES.H"
 #include "INPUT.H"
 
@@ -321,6 +322,7 @@ void AffGrilleExt() {
 
     ClearAniPoly();
     SeaFx_FrameBegin();
+    DynLight_FrameBegin();
 
     ClsTerrainZBuf();
 
@@ -349,6 +351,9 @@ void AffGrilleExt() {
     SeaFx_DropHidden();
 
     Switch_Fillers(FILL_POLY_TEXTURES);
+
+    /* The lamps the cubes gathered, into the frame the background is kept from. */
+    DynLight_BakeBackground();
 
     CopyScreen(Log, Screen);
 

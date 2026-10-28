@@ -4,7 +4,7 @@ Variables and locations that can be changed or exposed as options to improve gra
 
 ## Shipped options
 
-All nine are off by default, so a stock run renders exactly as before. Eight of them are reachable from the Options → Graphics submenu (see [MENU.md](MENU.md)) and can also be set from the console or the config file; interior render scaling is read once at startup and stays environment-only.
+All ten are off by default, so a stock run renders exactly as before. Nine of them are reachable from the Options → Graphics submenu (see [MENU.md](MENU.md)) and can also be set from the console or the config file; interior render scaling is read once at startup and stays environment-only.
 
 | Option | Menu row | Console | lba2.cfg | Environment | Values |
 |--------|----------|---------|----------|-------------|--------|
@@ -17,6 +17,7 @@ All nine are off by default, so a stock run renders exactly as before. Eight of 
 | Rain look | Rain | `gfx_rain_fx` | `RainFx` | (none) | 0 the 1997 look, 1 translucent streaks, wind and a near layer |
 | Sea | Sea | `gfx_sea` | `SeaMotion` | (none) | 0 the 1997 still sea, 1 moving with a slow current, 2 moving with chop |
 | Exterior view | Exterior view | `gfx_fov` | `ExteriorFov` | (none) | 0 the fixed focal, 1 keep the 1997 vertical view |
+| Lighting | Lighting | `gfx_dynlight` | `DynLight` | (none) | 0 the 1997 light, 1 dynamic lights in the palette, 2 and colour at present time |
 
 **Texture filtering** smooths magnified texels on terrain, sea, and sky. The rasterizer works in palette indices, where averaging two entries is meaningless, so the blend is a precomputed table of the nearest palette index to each 25/50/75% RGB mix. Costs roughly 7% of frame time on terrain and 4% on a sea-heavy view at 1728x1080 with the 4-tap setting. The animated water a cube carries (the shallows around the lighthouse islet, say) is drawn with the rest of the terrain and then redrawn a quarter at a time through the fillers that test the depth without writing it, which objects in water, on the buggy and in the end credits share; those filter while the water is being redrawn, and while the moving sea is refilled (`SeaFx_Refill`), and not otherwise (`PolyTexFilterNZW`, [POLYFILT.H](../LIB386/H/POLYGON/POLYFILT.H)), so the water keeps its filtering after the frame that drew it and the objects drawn through them stay unfiltered.
 
@@ -74,6 +75,29 @@ The setting is recorded: the wind moves the drops, the streak decides where a dr
 
 ```
 gfx_rain_scale 1; gfx_rain_fx 1
+```
+
+**Lighting** adds point lights to the exteriors. The 1997 engine lights a scene's 3D bodies from one direction, carries the terrain's light baked into each cube (`MapIntensity`, the low nibble of each vertex), draws its sprites as they are, and keeps every colour a palette index. With the setting on ([SOURCES/DYNLIGHT.H](../SOURCES/DYNLIGHT.H)):
+
+- **1, Dynamic.** At night, when the fog colour is dark as under the Citadel's storm, the street lamps light the ground and the walls about them. The magic ball, its trail, the lightning and protection spells, the impacts' fire, a burst of bright coloured particles and the hero burning in lava light what they pass over, by day at half strength. A light raises each pixel up its own 16-step ramp (`DynLight_BuildSurf`), so the fog and shade tables still read it. The level falls off with the distance in space, rebuilt from the Z-buffer, fades in the fog as the fillers' bands do, and an ordered dither rounds it to the 16 steps. The lamps are baked into the background on each full redraw with a halo about each globe (`DynLight_BakeBackground`), and again where the shallows or the moving sea are redrawn between full redraws (`DynLight_Refreshed`). The moving lights are drawn over the background each frame before any text, and erased with the frame's other moving boxes (`DynLight_MovingPass`).
+- **2, Colour.** The same pools, and a stage at present time, on the frame converted to true colour (`DynLight_PresentStage`, which `SetPresentLightCallback` runs before the console and the touch pad). The lights tint what they light toward their colour, a lamp's warm, and a soft glow surrounds the globes and the moving lights in place of the palette's halo. It covers what lies behind the light, never an actor or a nearer wall, and a lamp's goes when an actor hides its globe. The glow takes its colour from the palette the frame was converted with, so a fade or a lightning flash takes it along. The stage lights only the pixels that still show the scene as drawn, never the text or the menus, and stands down when most of the frame shows something else: a menu, the holomap, a film.
+
+The lamps are found in the light the 1997 artists painted under them: a pool that is filled, ringed with dark ground and centred on the decor (`DynLight_LampAt`). On the 14 islands this keeps the Citadel's nine street lamps and no other decor. A lamp's colour is its globe's, the body's highest polygon, and its pool reaches one and a half times the globe's height. A cube's lamps are found the first time it is drawn with the light on, and kept until the next island.
+
+What it does not do. Indoors there is no Z-buffer, its memory holding the bricks, so the light waits for the next exterior. The actors are not lit in the palette; the ground and walls around them are, and at level 2 the tint reaches an actor as it reaches what is behind it. The lighthouse's lantern and the lights painted into textures are not found.
+
+Measured at 1920x1080 at the Citadel's town start, at night, with seven lamps gathered and three of them covering the frame:
+
+| | Lighting off | Dynamic | Colour |
+|---|---|---|---|
+| A frame that redraws only its objects | 2.2 ms | 2.2 ms | 3.6 ms |
+| The magic ball in flight, the light's own pass | | 0.2 to 0.4 ms | 0.4 to 0.6 ms |
+| Each full redraw, the lamps' bake | | about 4 ms | about 4 ms |
+
+Pixels only: the passes read the scene and write the frame, never game state, and draw nothing from the shared random stream, so recordings do not carry the setting. `screenshot presented` saves the frame as presented, with the colour stage; `screenshot` and `--screenshot` save the indexed frame without it. `gfx_dynlight_debug 1` marks each light found with a cross.
+
+```
+gfx_dynlight 2
 ```
 
 ## Ideas not yet wired up
