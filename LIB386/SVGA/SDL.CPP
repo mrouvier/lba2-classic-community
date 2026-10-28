@@ -28,6 +28,7 @@ S32 screenLockCount = 0;
 bool frameDirty = false;
 static PrePresentFn s_prePresent = NULL;
 static PrePresentFn s_overlayPrePresent = NULL;
+static PrePresentFn s_presentLight = NULL;
 static PresentTimingFn s_presentBegin = NULL;
 static PresentTimingFn s_presentEnd = NULL;
 
@@ -161,12 +162,15 @@ void CopyVideoArea(void *dst, const void *src, const U32 tabOffDst[], const T_BO
 
 void SetPrePresentCallback(PrePresentFn fn) { s_prePresent = fn; }
 void SetOverlayPrePresentCallback(PrePresentFn fn) { s_overlayPrePresent = fn; }
+void SetPresentLightCallback(PrePresentFn fn) { s_presentLight = fn; }
 void SetPresentTimingCallbacks(PresentTimingFn begin, PresentTimingFn end) {
     s_presentBegin = begin;
     s_presentEnd = end;
 }
 
 static void ApplyOverlays(U32 *pixels, U32 pitch, U32, U32, const U8 *palette) {
+    if (s_presentLight)
+        s_presentLight(pixels, pitch, ModeResX, ModeResY, palette);
     if (s_prePresent)
         s_prePresent(pixels, pitch, ModeResX, ModeResY, palette);
     if (s_overlayPrePresent)
@@ -184,7 +188,7 @@ static void PresentFrame() {
        rectangle is copied to Phys. Pixels outside that rectangle stay visible. */
     PlatformFrame frame = {
         (const U8 *)Phys, ModeResX, ModeResY, VideoSurfacePitch(), framePalette,
-        (s_prePresent || s_overlayPrePresent) ? ApplyOverlays : NULL};
+        (s_presentLight || s_prePresent || s_overlayPrePresent) ? ApplyOverlays : NULL};
     g_platform.window.present(&frame);
 }
 

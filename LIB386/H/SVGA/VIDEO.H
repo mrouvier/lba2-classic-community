@@ -54,6 +54,12 @@ void SetPrePresentCallback(PrePresentFn fn);
  *  overlay. Same signature as PrePresentFn. */
 void SetOverlayPrePresentCallback(PrePresentFn fn);
 
+/** Optional light stage: runs on the converted frame before every other
+ *  overlay, so the console and the touch pad draw over the lit frame and a
+ *  console capture sees it. Same signature as PrePresentFn; NULL, the default,
+ *  presents the frame as converted. */
+void SetPresentLightCallback(PrePresentFn fn);
+
 /** Optional timing taps around the present path (palette LUT scan + texture upload + GL submit + vsync wait).
     Both callbacks must be set together (or both NULL); called at most once per UnlockVideoSurface. */
 typedef void (*PresentTimingFn)(void);
