@@ -1,6 +1,7 @@
 #include "DYNLIGHT.H"
 #include "C_EXTERN.H" /* FirstTime, CubeMode, ListExtra, ListObjet, PtrPalCurrent, IdxPalette, sprites */
 #include "FLOW.H"     /* ListPartFlow: the magic ball's burst */
+#include "GRILLE.H"   /* BufferMaskBrick, GrilleBrickDrawn: an interior's bricks */
 #include "MESSAGE.H"  /* FlagAnimWhoSpeak: the extras the scene skips while someone speaks */
 #include "SETTINGS.H"
 #include "3DEXT/VAR_EXT.H" /* ListDecors, MapIntensity, HQR_Isle_Obj, FogCoul, ClipZFar; T_DECORS by C_EXTERN.H */
@@ -66,8 +67,10 @@ const T_SETTING *DynLight_Settings(S32 *count) {
     The lights
  *══════════════════════════════════════════════════════════════════════════*/
 
-/* A light of the frame, in camera space: x right, y up, z depth, world units,
-   as the exterior projection sees it (Xp = XCentre + x*LFactorX/z). */
+/* A light of the frame. Outdoors in camera space: x right, y up, z depth,
+   world units, as the exterior projection sees it (Xp = XCentre +
+   x*LFactorX/z). Indoors at its world position, the isometric camera being
+   a translation (DynLight_IsoProject). */
 typedef struct {
     float x, y, z;
     float reach; /* nothing past it */
@@ -99,6 +102,19 @@ static S32 s_bw = 0, s_bh = 0;
 static S32 s_zValid = 0;
 /* Level 2: the lamps' tint, valid from the full redraw that gathered them. */
 static S32 s_tintStaticValid = 0;
+
+/* Interiors (DynLight_Iso*): the background's position per pixel, kept as
+   (X + Z) / 2 and the face it shows, rebuilt while an interior's bricks are
+   drawn, with the camera and the centre they were drawn with. */
+static S32 s_iso = 0;         /* this frame lights an interior */
+static U16 *s_isoS = NULL;    /* (X + Z) / 2, DYN_ISO_NONE where no brick shows */
+static U8 *s_isoF = NULL;     /* the face, DYN_ISO_TOP.. */
+static float *s_isoD = NULL;  /* X - Z of each column's pixels */
+static S32 s_isoValid = 0;    /* the frame's background is the one described */
+static S32 s_isoBuilding = 0; /* between DynLight_IsoBegin and DynLight_IsoEnd */
+static S32 s_isoCamX, s_isoCamY, s_isoCamZ, s_isoXC, s_isoYC;
+static T_DYN_BOX s_isoClip;  /* the clip the bricks were drawn in */
+static S32 s_isoScale = 256; /* how strong the lights are in this room, 256ths */
 
 /* A street lamp: its pool reaches one and a half times the globe's height, so
    the ground under it takes a third of the light and the walls about it more;
@@ -256,8 +272,12 @@ void DynLight_GatherCube(void) {
     Moving lights: the magic ball, its trail, the spells, the fire
  *──────────────────────────────────────────────────────────────────────────*/
 
-/* The colour a sprite gives, its brightest pixel, per palette. HQR_Get touches
-   the cache's order, so each sprite is read once per palette. */
+/* The colour a sprite gives, per palette: of its own pixels, the one nearest
+   the mean of its bright half (those at least half as bright as its
+   brightest), so a ball's white highlight does not make a red ball's light
+   white; and how bright its brightest pixel is, which a fading fireball's
+   light follows. HQR_Get touches the cache's order, so each sprite is read
+   once per palette. */
 #define DYN_SPRITES 512
 static U8 s_sprKnown[DYN_SPRITES];
 static U8 s_sprColour[DYN_SPRITES];
@@ -278,15 +298,33 @@ static S32 DynLight_SpriteColour(S32 num, S32 *luma) {
             const U8 *spr = bank + ReadLE_U32(bank);
             const S32 n = spr[0] * spr[1];
             const U8 *px = spr + 4;
-            S32 i;
+            S32 i, sr = 0, sg = 0, sb = 0, cnt = 0, bestD = 0x7FFFFFFF;
+            for (i = 0; i < n; i++)
+                if (px[i] && DynLight_Luma(PtrPalCurrent + 3 * px[i]) > bestL)
+                    bestL = DynLight_Luma(PtrPalCurrent + 3 * px[i]);
             for (i = 0; i < n; i++) {
-                S32 l;
-                if (!px[i])
+                const U8 *rgb = PtrPalCurrent + 3 * px[i];
+                if (!px[i] || 2 * DynLight_Luma(rgb) < bestL)
                     continue;
-                l = DynLight_Luma(PtrPalCurrent + 3 * px[i]);
-                if (l > bestL) {
-                    bestL = l;
-                    best = px[i];
+                sr += rgb[0];
+                sg += rgb[1];
+                sb += rgb[2];
+                cnt++;
+            }
+            if (cnt) {
+                sr /= cnt;
+                sg /= cnt;
+                sb /= cnt;
+                for (i = 0; i < n; i++) {
+                    const U8 *rgb = PtrPalCurrent + 3 * px[i];
+                    S32 d;
+                    if (!px[i] || 2 * DynLight_Luma(rgb) < bestL)
+                        continue;
+                    d = (rgb[0] - sr) * (rgb[0] - sr) + (rgb[1] - sg) * (rgb[1] - sg) + (rgb[2] - sb) * (rgb[2] - sb);
+                    if (d < bestD) {
+                        bestD = d;
+                        best = px[i];
+                    }
                 }
             }
         }
@@ -306,7 +344,7 @@ static const T_DYN_KIND DynKindTrail = {1500, 72, 48, 80, 90, 128};
 static const T_DYN_KIND DynKindBolt = {3000, 160, 96, 90, 150, 220};
 static const T_DYN_KIND DynKindShield = {1100, 40, 24, 40, 40, 96};
 static const T_DYN_KIND DynKindFire = {2400, 160, 96, 120, 150, 220};
-static const T_DYN_KIND DynKindBurst = {2000, 128, 0, 0, 0, 160};
+static const T_DYN_KIND DynKindBurst = {2000, 128, 0, 0, 0, 160}; /* reach: see DynLight_GatherMoving */
 static const T_DYN_KIND DynKindHero = {3000, 176, 0, 0, 0, 256};
 
 /* The impacts' fire: the flash (139..142), the fireball (143..166) and the
@@ -320,9 +358,15 @@ static void DynLight_AddMoving(S32 wx, S32 wy, S32 wz, const T_DYN_KIND *k, S32 
     if (s_nbMoving >= DYN_MOVING_LIGHTS || colour < 0 || scale <= 0)
         return;
     l = &s_moving[s_nbMoving];
-    DynLight_ToCam(wx, wy, wz, l);
-    if (l->z + k->reach <= (float)NearClip || l->z - k->reach >= (float)Fill_Z_Fog_Far)
-        return;
+    if (s_iso) { /* indoors the light keeps its world position; its screen box culls it */
+        l->x = (float)wx;
+        l->y = (float)wy;
+        l->z = (float)wz;
+    } else {
+        DynLight_ToCam(wx, wy, wz, l);
+        if (l->z + k->reach <= (float)NearClip || l->z - k->reach >= (float)Fill_Z_Fog_Far)
+            return;
+    }
     l->reach = (float)k->reach;
     l->emitR = (float)k->emitR;
     l->level = (k->level * scale) >> 8;
@@ -338,10 +382,11 @@ static void DynLight_AddMoving(S32 wx, S32 wy, S32 wz, const T_DYN_KIND *k, S32 
    wait, time-in, talking and blink tests, read after AffScene ran, so a
    trail whose wait ends this frame lights a frame before its sprite shows;
    DynLight_AddMoving's near and far test stands in for AffScene's preclip,
-   so a light just behind the camera still lights the ground in view), the
-   flows alive, the hero on fire. */
+   so a light just behind the camera still lights the ground in view; indoors
+   the light's screen box does), the flows alive, the hero on fire. Outdoors
+   the lights give half by day; indoors as much as the room is dark. */
 static void DynLight_GatherMoving(void) {
-    const S32 day = DynLight_Night() ? 256 : DYN_DAY_SCALE;
+    const S32 day = s_iso ? s_isoScale : (DynLight_Night() ? 256 : DYN_DAY_SCALE);
     S32 n;
     s_nbMoving = 0;
     for (n = 0; n < MAX_EXTRAS; n++) {
@@ -412,7 +457,16 @@ static void DynLight_GatherMoving(void) {
         luma = (sr * 77 + sg * 150 + sb * 29) >> 8;
         if (luma < 110 || mx - mn < 48)
             continue;
-        DynLight_AddMoving(sx / live, sy / live, sz / live, &DynKindBurst, (day * live) / f->NbDot, colour);
+        {
+            /* A candle's few dots light less far than the magic ball's
+               burst of thirty: 600 units and 250 more per square root of a
+               dot alive. */
+            T_DYN_KIND k = DynKindBurst;
+            k.reach = 600 + (S32)(250.0f * sqrtf((float)live));
+            if (k.reach > DynKindBurst.reach)
+                k.reach = DynKindBurst.reach;
+            DynLight_AddMoving(sx / live, sy / live, sz / live, &k, (day * live) / f->NbDot, colour);
+        }
     }
 
     /* The hero burning in lava (OBJECT.CPP gives the body GEN_BODY_FEU). */
@@ -472,6 +526,13 @@ static void DynLight_FreeBuffers(void) {
     free(s_kx);
     free(s_zmin);
     free(s_zmax);
+    free(s_isoS);
+    free(s_isoF);
+    free(s_isoD);
+    s_isoS = NULL;
+    s_isoF = NULL;
+    s_isoD = NULL;
+    s_isoValid = 0;
     s_ref = s_base = s_lit = NULL;
     s_kx = NULL;
     s_zmin = s_zmax = NULL;
@@ -500,8 +561,12 @@ static S32 DynLight_Buffers(void) {
     s_kx = (float *)malloc(sizeof(float) * w);
     s_zmin = (U16 *)malloc(sizeof(U16) * (size_t)s_bw * s_bh);
     s_zmax = (U16 *)malloc(sizeof(U16) * (size_t)s_bw * s_bh);
+    s_isoS = (U16 *)malloc(sizeof(U16) * (size_t)w * h);
+    s_isoF = (U8 *)malloc((size_t)w * h);
+    s_isoD = (float *)malloc(sizeof(float) * w);
     if (s_staticAcc.pix == NULL || s_staticAcc.blk == NULL || s_movAcc.pix == NULL || s_movAcc.blk == NULL ||
-        s_ref == NULL || s_base == NULL || s_lit == NULL || s_kx == NULL || s_zmin == NULL || s_zmax == NULL) {
+        s_ref == NULL || s_base == NULL || s_lit == NULL || s_kx == NULL || s_zmin == NULL || s_zmax == NULL ||
+        s_isoS == NULL || s_isoF == NULL || s_isoD == NULL) {
         DynLight_FreeBuffers();
         return 0;
     }
@@ -997,23 +1062,330 @@ void DynLight_Refreshed(S32 x0, S32 y0, S32 x1, S32 y1) {
     }
 }
 
-void DynLight_Baked(S32 x0, S32 y0, S32 x1, S32 y1) {
-    const U8 *scr = (const U8 *)Screen;
+void DynLight_Baking(S32 x0, S32 y0, S32 x1, S32 y1) {
+    const U8 *log = (const U8 *)Log, *scr = (const U8 *)Screen;
     T_DYN_BOX b;
     S32 x, y;
-    if (!DynLight || !DynLight_StaticBox(x0, y0, x1, y1, &b))
+    if (!DynLight)
+        return;
+    if (CubeMode != CUBE_EXTERIEUR) {
+        /* Indoors the object's pixels show no brick from now on. */
+        if (!s_isoValid || s_w != (S32)ModeDesiredX || s_h != (S32)ModeDesiredY)
+            return;
+        b.x0 = x0;
+        b.y0 = y0;
+        b.x1 = x1;
+        b.y1 = y1;
+        DynLight_Clip(&b, &s_isoClip);
+        for (y = b.y0; y <= b.y1; y++) {
+            const U32 row = TabOffLine[y];
+            for (x = b.x0; x <= b.x1; x++)
+                if (log[row + x] != scr[row + x])
+                    s_isoS[row + x] = DYN_ISO_NONE;
+        }
+        return;
+    }
+    if (!DynLight_StaticBox(x0, y0, x1, y1, &b))
         return;
     for (y = b.y0; y <= b.y1; y++) {
         const U32 row = TabOffLine[y];
         for (x = b.x0; x <= b.x1; x++) {
             const U32 i = row + (U32)x;
-            if (scr[i] != s_ref[i]) { /* the object's pixel: the lamps leave it */
+            if (log[i] != scr[i]) { /* the object's pixel: the lamps leave it */
                 s_lit[i] = 0;
-                s_base[i] = scr[i];
-                s_ref[i] = scr[i];
+                s_base[i] = log[i];
+                s_ref[i] = log[i];
             }
         }
     }
+}
+
+/*══════════════════════════════════════════════════════════════════════════*
+    Interiors
+ *══════════════════════════════════════════════════════════════════════════*/
+
+/* The face and the depth of each pixel of a brick's 48 x 38 box
+   (DynLight_IsoT3), whatever the brick, the camera and the resolution: the
+   depth as its part of DynLight_IsoS2, (T3 + 3) / 6, to which a cell adds
+   256(cx + cz) (1536 is 6 x 256). */
+static U16 s_isoT6[DYN_ISO_H][DYN_ISO_W];
+static U8 s_isoFaceOf[DYN_ISO_H][DYN_ISO_W];
+static S32 s_isoTables = 0;
+
+static void DynLight_IsoTables(void) {
+    S32 u, v, face;
+    if (s_isoTables)
+        return;
+    for (v = 0; v < DYN_ISO_H; v++)
+        for (u = 0; u < DYN_ISO_W; u++) {
+            s_isoT6[v][u] = (U16)((DynLight_IsoT3(u, v, &face) + 3) / 6);
+            s_isoFaceOf[v][u] = (U8)face;
+        }
+    s_isoTables = 1;
+}
+
+/* GrilleBrickDrawn while the room is drawn: the brick's opaque pixels, read
+   from its mask (the CopyMask layout: per row a count, then runs to skip and
+   to write, the first a skip), inside the clip AffGraph drew it in. The
+   bricks come in the painter's order, so each pixel ends with the brick
+   that shows there. */
+static void DynLight_IsoBrick(S32 brick, S32 xs, S32 ys, S32 x, S32 y, S32 z) {
+    const U8 *m;
+    S32 dy, hx, hy, r, base, x0, x1;
+    const S32 cy0 = ClipYMin, cy1 = ClipYMax;
+    (void)y;
+    if (!s_isoBuilding || BufferMaskBrick == NULL || brick < 0)
+        return;
+    base = 256 * (x + z);
+    /* The columns a pixel may take: the clip AffGraph drew in, and the box. */
+    x0 = ClipXMin > xs ? ClipXMin : xs;
+    x1 = ClipXMax < xs + DYN_ISO_W - 1 ? ClipXMax : xs + DYN_ISO_W - 1;
+    m = BufferMaskBrick + ((const U32 *)BufferMaskBrick)[brick];
+    dy = m[1];
+    hx = m[2];
+    hy = m[3];
+    m += 4;
+    for (r = 0; r < dy; r++) {
+        const S32 py = ys + hy + r, v = hy + r;
+        const S32 rowIn = py >= cy0 && py <= cy1 && v >= 0 && v < DYN_ISO_H;
+        U16 *ps = rowIn ? s_isoS + TabOffLine[py] : NULL;
+        U8 *pf = rowIn ? s_isoF + TabOffLine[py] : NULL;
+        const U16 *t6 = rowIn ? s_isoT6[v] : NULL;
+        const U8 *fc = rowIn ? s_isoFaceOf[v] : NULL;
+        S32 n = *m++, px = xs + hx;
+        while (n > 0) {
+            S32 run, a, b, q;
+            px += *m++; /* to skip */
+            if (--n == 0)
+                break;
+            run = *m++; /* to write */
+            n--;
+            if (rowIn) {
+                a = px > x0 ? px : x0;
+                b = px + run - 1 < x1 ? px + run - 1 : x1;
+                for (q = a; q <= b; q++) {
+                    ps[q] = (U16)(base + t6[q - xs]); /* DynLight_IsoS2 */
+                    pf[q] = fc[q - xs];
+                }
+            }
+            px += run;
+        }
+    }
+}
+
+void DynLight_IsoBegin(void) {
+    S32 y;
+    s_isoValid = 0;
+    s_isoBuilding = 0;
+    GrilleBrickDrawn = NULL;
+    if (!DynLight || CubeMode != CUBE_INTERIEUR || !DynLight_Buffers())
+        return;
+    DynLight_IsoTables();
+    for (y = 0; y < s_h; y++)
+        memset(s_isoS + TabOffLine[y], 0xFF, sizeof(U16) * (size_t)s_w);
+    s_isoCamX = CameraX;
+    s_isoCamY = CameraY;
+    s_isoCamZ = CameraZ;
+    s_isoXC = XCentre;
+    s_isoYC = YCentre;
+    s_isoClip.x0 = ClipXMin < 0 ? 0 : ClipXMin;
+    s_isoClip.y0 = ClipYMin < 0 ? 0 : ClipYMin;
+    s_isoClip.x1 = ClipXMax > s_w - 1 ? s_w - 1 : ClipXMax;
+    s_isoClip.y1 = ClipYMax > s_h - 1 ? s_h - 1 : ClipYMax;
+    s_nbStatic = 0;        /* the lamps are the exteriors' */
+    s_tintStaticValid = 0; /* and so is their tint */
+    s_isoBuilding = 1;
+    GrilleBrickDrawn = DynLight_IsoBrick;
+}
+
+void DynLight_IsoEnd(void) {
+    const U8 *log = (const U8 *)Log;
+    S32 x, y, sum = 0, count = 0, ambient;
+    GrilleBrickDrawn = NULL;
+    if (!s_isoBuilding)
+        return;
+    s_isoBuilding = 0;
+    s_isoValid = 1;
+    /* How dark the room is: the mean luma of its bricks, a pixel in sixteen. */
+    if (PtrPalCurrent != NULL)
+        for (y = s_isoClip.y0; y <= s_isoClip.y1; y += 4) {
+            const U32 row = TabOffLine[y];
+            for (x = s_isoClip.x0; x <= s_isoClip.x1; x += 4)
+                if (s_isoS[row + x] != DYN_ISO_NONE) {
+                    sum += DynLight_Luma(PtrPalCurrent + 3 * log[row + x]);
+                    count++;
+                }
+        }
+    ambient = count ? sum / count : 255;
+    s_isoScale = DynLight_IsoStrength(ambient);
+}
+
+/* The interior was drawn with this camera, at this size: a camera moved
+   since (a modal recentring it, say) waits for the next full redraw. */
+static S32 DynLight_IsoReady(void) {
+    return s_isoValid && s_w == (S32)ModeDesiredX && s_h == (S32)ModeDesiredY && CameraX == s_isoCamX &&
+           CameraY == s_isoCamY && CameraZ == s_isoCamZ && XCentre == s_isoXC && YCentre == s_isoYC;
+}
+
+static void DynLight_IsoColumns(void) {
+    S32 x;
+    for (x = 0; x < s_w; x++)
+        s_isoD[x] = (64.0f * (float)(x - s_isoXC) - 32.0f) / 3.0f + (float)(s_isoCamX - s_isoCamZ);
+}
+
+/* The world point a background pixel shows, and its face; 0 where no brick
+   does. `rowY` is the row's DynLight_IsoRowY. */
+static float DynLight_IsoRowY(S32 y) {
+    return (float)s_isoCamY - (6.0f * (float)(s_isoCamX + s_isoCamZ) + 256.0f * (float)(y - s_isoYC)) / 15.0f;
+}
+
+static S32 DynLight_IsoAt(U32 i, S32 x, float rowY, float *X, float *Y, float *Z) {
+    const U16 s2 = s_isoS[i];
+    float S;
+    if (s2 == DYN_ISO_NONE)
+        return 0;
+    S = 2.0f * (float)s2;
+    *X = 0.5f * (S + s_isoD[x]);
+    *Z = 0.5f * (S - s_isoD[x]);
+    *Y = rowY + 0.4f * S;
+    return 1;
+}
+
+/* The light at a background point indoors: the falloff, times how much the
+   face takes of it (DynLight_IsoLambert). 0..level. */
+static S32 DynLight_IsoAtLight(const T_DYN_LIGHT *l, S32 level, float r2, float inv2, U8 face, float X, float Y,
+                               float Z) {
+    const float dx = l->x - X, dy = l->y - Y, dz = l->z - Z;
+    const float d2 = dx * dx + dy * dy + dz * dz;
+    float dot;
+    if (d2 >= r2)
+        return 0;
+    dot = face == DYN_ISO_TOP ? dy : (face == DYN_ISO_PX ? dx : dz);
+    return (DynLight_FalloffF(d2, inv2, level) * DynLight_IsoLambert(dot, sqrtf(d2))) >> 8;
+}
+
+/* A light's sphere on screen indoors, clipped to `win`; 0 when nothing of it
+   shows. Its centre where LongProjectPointIso puts it, give or take the
+   pixel the bricks sit apart from the objects. */
+static S32 DynLight_IsoLightBox(const T_DYN_LIGHT *l, float r, const T_DYN_BOX *win, T_DYN_BOX *b) {
+    float sx, sy;
+    DynLight_IsoProject(l->x, l->y, l->z, s_isoCamX, s_isoCamY, s_isoCamZ, s_isoXC, s_isoYC, &sx, &sy);
+    b->x0 = (S32)(sx - r * DYN_ISO_RX) - 2;
+    b->x1 = (S32)(sx + r * DYN_ISO_RX) + 2;
+    b->y0 = (S32)(sy - r * DYN_ISO_RY) - 2;
+    b->y1 = (S32)(sy + r * DYN_ISO_RY) + 2;
+    DynLight_Clip(b, win);
+    return !DynLight_BoxEmpty(b);
+}
+
+/* DynLight_AddPool indoors: the pixels whose brick lies within the light's
+   reach, lit as the face they show takes it. The room's void (colour 0)
+   and what no brick drew are left alone. */
+static void DynLight_IsoAddPool(T_DYN_ACC *acc, const T_DYN_LIGHT *l, const T_DYN_BOX *win, S32 background,
+                                T_DYN_BOX *u) {
+    const float r2 = l->reach * l->reach, inv2 = 1.0f / r2;
+    const U8 *log = (const U8 *)Log, *scr = (const U8 *)Screen;
+    /* The sphere's (X + Z) / 2, which a pixel's kept value is compared with
+       before any arithmetic. */
+    const float half = 0.5f * (l->x + l->z), span = 0.7072f * l->reach + 1.0f;
+    const S32 sLo = half - span < 0.0f ? 0 : (S32)(half - span), sHi = (S32)(half + span) + 1;
+    T_DYN_BOX b;
+    S32 x, y;
+    if (l->level <= 0 || !DynLight_IsoLightBox(l, l->reach, win, &b))
+        return;
+    for (y = b.y0; y <= b.y1; y++) {
+        const U32 row = TabOffLine[y];
+        const float rowY = DynLight_IsoRowY(y);
+        for (x = b.x0; x <= b.x1; x++) {
+            const U32 i = row + (U32)x;
+            const S32 s2 = s_isoS[i]; /* DYN_ISO_NONE lies above any sHi */
+            float X, Y, Z;
+            S32 val, sum;
+            if (s2 < sLo || s2 > sHi || !log[i] || !DynLight_IsoAt(i, x, rowY, &X, &Y, &Z))
+                continue;
+            if (background && log[i] != scr[i])
+                continue;
+            val = DynLight_IsoAtLight(l, l->level, r2, inv2, s_isoF[i], X, Y, Z);
+            if (val <= 0)
+                continue;
+            sum = val + acc->pix[i];
+            acc->pix[i] = (U8)(sum > 255 ? 255 : sum);
+        }
+    }
+    DynLight_Union(u, &b);
+}
+
+/* DynLight_Emitter indoors: where the light's sprite is (as AffScene puts it),
+   how wide it shows, and 0 when a brick stands between it and the viewer at
+   its centre, nearer by more than its diameter. `nearKey` is its own
+   DynLight_IsoNear. */
+#define DYN_ISO_NEAR_PER_UNIT 1.625f /* DynLight_IsoNear's step for a world unit along the view */
+static S32 DynLight_IsoEmitter(const T_DYN_LIGHT *l, S32 scale, S32 *sx, S32 *sy, S32 *rs, float *nearKey) {
+    float fx, fy, X, Y, Z;
+    S32 r;
+    if (l->emitR <= 0.0f)
+        return 0;
+    DynLight_IsoProject(l->x, l->y, l->z, s_isoCamX, s_isoCamY, s_isoCamZ, s_isoXC, s_isoYC, &fx, &fy);
+    *sx = (S32)floorf(fx);
+    *sy = (S32)floorf(fy);
+    r = (S32)((float)scale * l->emitR * DYN_ISO_RX);
+    if (r > (s_w < s_h ? s_w : s_h) / 4)
+        r = (s_w < s_h ? s_w : s_h) / 4;
+    if (r < 2)
+        return 0;
+    *rs = r;
+    *nearKey = DynLight_IsoNear(l->x, l->y, l->z);
+    if (*sx >= 0 && *sx < s_w && *sy >= 0 && *sy < s_h) {
+        const U32 i = TabOffLine[*sy] + (U32)*sx;
+        if (DynLight_IsoAt(i, *sx, DynLight_IsoRowY(*sy), &X, &Y, &Z) &&
+            DynLight_IsoNear(X, Y, Z) > *nearKey + 2.0f * l->emitR * DYN_ISO_NEAR_PER_UNIT)
+            return 0;
+    }
+    return 1;
+}
+
+/* Level 1's halo indoors: the bricks about the light, at its depth or
+   behind it, brightened in a disc around it on screen. */
+static void DynLight_IsoAddHalo(T_DYN_ACC *acc, const T_DYN_LIGHT *l, const T_DYN_BOX *win, S32 background,
+                                T_DYN_BOX *u) {
+    const U8 *log = (const U8 *)Log, *scr = (const U8 *)Screen;
+    S32 sx, sy, rs, rs2, x, y;
+    float nearKey, front, inv2;
+    T_DYN_BOX b;
+    if (l->halo <= 0 || !DynLight_IsoEmitter(l, DYN_HALO_SCALE, &sx, &sy, &rs, &nearKey))
+        return;
+    front = nearKey + 2.0f * l->emitR * DYN_ISO_NEAR_PER_UNIT;
+    rs2 = rs * rs;
+    inv2 = 1.0f / (float)rs2;
+    b.x0 = sx - rs;
+    b.y0 = sy - rs;
+    b.x1 = sx + rs;
+    b.y1 = sy + rs;
+    DynLight_Clip(&b, win);
+    if (DynLight_BoxEmpty(&b))
+        return;
+    for (y = b.y0; y <= b.y1; y++) {
+        const U32 row = TabOffLine[y];
+        const float rowY = DynLight_IsoRowY(y);
+        const S32 dy2 = (y - sy) * (y - sy);
+        const S32 half = (S32)sqrtf((float)(rs2 - dy2));
+        const S32 x0 = sx - half > b.x0 ? sx - half : b.x0, x1 = sx + half < b.x1 ? sx + half : b.x1;
+        for (x = x0; x <= x1; x++) {
+            const U32 i = row + (U32)x;
+            const S32 r2 = (x - sx) * (x - sx) + dy2;
+            float X, Y, Z;
+            S32 v;
+            /* Bricks only, at the light's depth or behind it: the void and a
+               baked object are left as drawn. */
+            if (r2 >= rs2 || !log[i] || !DynLight_IsoAt(i, x, rowY, &X, &Y, &Z) || DynLight_IsoNear(X, Y, Z) > front)
+                continue;
+            if (background && log[i] != scr[i])
+                continue;
+            v = DynLight_FalloffF((float)r2, inv2, l->halo) + acc->pix[i];
+            acc->pix[i] = (U8)(v > 255 ? 255 : v);
+        }
+    }
+    DynLight_Union(u, &b);
 }
 
 /*══════════════════════════════════════════════════════════════════════════*
@@ -1030,7 +1402,7 @@ void DynLight_Baked(S32 x0, S32 y0, S32 x1, S32 y1) {
 #define DYN_TINT_SLOTS 4 /* light colours a frame tints with; a fifth tints nothing */
 typedef struct {
     S32 sx, sy, rs, glow;
-    S32 front; /* the Z-buffer value of the emitter's near side: what is nearer is not glowed over */
+    S32 front; /* s_glowZ's value at the emitter's near side: what is nearer is not glowed over */
     U8 colour;
 } T_DYN_GLOW;
 typedef struct {
@@ -1042,9 +1414,11 @@ typedef struct {
     S32 nbSlots;
 } T_DYN_TINT;
 static U8 *s_snap = NULL;
-/* What the glows may cover, inside their discs: the Z-buffer's value where
-   the frame shows the background, 0 where it shows an actor or a sprite,
-   taken before the moving lights change the frame. */
+/* What the glows may cover, inside their discs, taken before the moving
+   lights change the frame: how far the background lies, 0 where the frame
+   shows an actor or a sprite (or, indoors, the void or a baked object).
+   Outdoors the Z-buffer's value; indoors 0xFFFF - DynLight_IsoNear / 2. The
+   larger, the farther, either way. */
 static U16 *s_glowZ = NULL;
 static T_DYN_TINT s_tintStatic, s_tintFrame;
 static const T_DYN_TINT *s_tintShown = NULL; /* the one the present reads */
@@ -1168,13 +1542,67 @@ static S32 DynLight_Slot(T_DYN_TINT *t, U8 colour) {
    cell's middle pixel. The tint reaches less far than the light: the colour
    gathers near the light, and the stage converts fewer pixels twice. */
 #define DYN_TINT_REACH 0.75f
+/* DynLight_AddTint indoors: each cell's middle pixel's brick, lit as the
+   face it shows takes the light. */
+static void DynLight_IsoAddTint(T_DYN_TINT *tt, const T_DYN_LIGHT *l, const T_DYN_BOX *win) {
+    const float reach = l->reach * DYN_TINT_REACH;
+    const float r2 = reach * reach, inv2 = 1.0f / r2;
+    T_DYN_BOX b, c;
+    S32 cx, cy, slot;
+    /* Only a light that shows takes one of the colours. */
+    if (!DynLight_IsoLightBox(l, reach, win, &b))
+        return;
+    slot = DynLight_Slot(tt, l->colour);
+    if (slot < 0)
+        return;
+    c.x0 = b.x0 >> 2;
+    c.y0 = b.y0 >> 2;
+    c.x1 = (b.x1 >> 2) + 1;
+    c.y1 = (b.y1 >> 2) + 1;
+    if (c.x1 > s_cw - 1)
+        c.x1 = s_cw - 1;
+    if (c.y1 > s_ch - 1)
+        c.y1 = s_ch - 1;
+    for (cy = c.y0; cy <= c.y1; cy++) {
+        const S32 py = cy * 4 + 2 > s_h - 1 ? s_h - 1 : cy * 4 + 2;
+        const float rowY = DynLight_IsoRowY(py);
+        for (cx = c.x0; cx <= c.x1; cx++) {
+            const S32 px = cx * 4 + 2 > s_w - 1 ? s_w - 1 : cx * 4 + 2;
+            const U32 i = TabOffLine[py] + (U32)px;
+            float X, Y, Z;
+            size_t ci;
+            S32 t;
+            if (!DynLight_IsoAt(i, px, rowY, &X, &Y, &Z))
+                continue;
+            t = DynLight_IsoAtLight(l, l->tint, r2, inv2, s_isoF[i], X, Y, Z);
+            if (t <= 0)
+                continue;
+            if (t > 255)
+                t = 255;
+            ci = (size_t)cy * s_cw + cx;
+            tt->t[ci] = (U16)(tt->t[ci] + t > 255 ? 255 : tt->t[ci] + t);
+            if (t > tt->best[ci]) {
+                tt->best[ci] = (U8)t;
+                tt->slot[ci] = (U8)slot;
+            }
+        }
+    }
+    DynLight_Union(&tt->box, &c);
+}
+
 static void DynLight_AddTint(T_DYN_TINT *tt, const T_DYN_LIGHT *l, const T_DYN_BOX *win) {
     const float reach = l->reach * DYN_TINT_REACH;
     const float r2 = reach * reach, inv2 = 1.0f / r2;
     T_DYN_VIEW v;
     T_DYN_BOX b, c;
     S32 cx, cy, slot, zbLo, zbHi;
-    if (l->tint <= 0 || !DynLight_LightBox(l, reach, win, &b))
+    if (l->tint <= 0)
+        return;
+    if (s_iso) {
+        DynLight_IsoAddTint(tt, l, win);
+        return;
+    }
+    if (!DynLight_LightBox(l, reach, win, &b))
         return;
     slot = DynLight_Slot(tt, l->colour);
     if (slot < 0)
@@ -1241,6 +1669,49 @@ static void DynLight_AddTint(T_DYN_TINT *tt, const T_DYN_LIGHT *l, const T_DYN_B
    background at the emitter's depth or behind it, never an actor or a nearer
    surface in front of it. A lamp's glow goes when an actor hides its globe;
    a moving light's centre is its own sprite, which the test leaves out. */
+/* DynLight_AddGlow indoors. What the glow may cover is kept as how far a
+   brick lies along the view, 0xFFFF - DynLight_IsoNear/2, so that, as
+   outdoors, the larger the farther; 0 on an actor, on the room's void and
+   on an object baked into the background, which the lights leave as drawn. */
+static void DynLight_IsoAddGlow(const T_DYN_LIGHT *l, const T_DYN_BOX *win) {
+    const U8 *log = (const U8 *)Log, *scr = (const U8 *)Screen;
+    T_DYN_GLOW *g;
+    T_DYN_BOX b;
+    S32 sx, sy, rs, x, y;
+    float nearKey, front;
+    if (l->glow <= 0 || s_nbGlow >= DYN_GLOWS || !DynLight_IsoEmitter(l, DYN_GLOW_SCALE, &sx, &sy, &rs, &nearKey))
+        return;
+    front = 65535.0f - 0.5f * (nearKey + 2.0f * l->emitR * DYN_ISO_NEAR_PER_UNIT);
+    g = &s_glow[s_nbGlow++];
+    g->sx = sx;
+    g->sy = sy;
+    g->rs = rs;
+    g->glow = l->glow;
+    g->front = front <= 0.0f ? 0 : (front >= 65535.0f ? 0xFFFF : (S32)front);
+    g->colour = l->colour;
+    b.x0 = sx - rs;
+    b.y0 = sy - rs;
+    b.x1 = sx + rs;
+    b.y1 = sy + rs;
+    DynLight_Clip(&b, win);
+    for (y = b.y0; y <= b.y1; y++) {
+        const U32 row = TabOffLine[y];
+        const float rowY = DynLight_IsoRowY(y);
+        const S32 half = (S32)sqrtf((float)(rs * rs - (y - sy) * (y - sy)));
+        const S32 x0 = sx - half > b.x0 ? sx - half : b.x0, x1 = sx + half < b.x1 ? sx + half : b.x1;
+        U16 *gz = s_glowZ + (size_t)y * s_w;
+        for (x = x0; x <= x1; x++) {
+            float X, Y, Z, far;
+            if (log[row + x] != scr[row + x] || !log[row + x] || !DynLight_IsoAt(row + (U32)x, x, rowY, &X, &Y, &Z))
+                gz[x] = 0;
+            else {
+                far = 65535.0f - 0.5f * DynLight_IsoNear(X, Y, Z);
+                gz[x] = (U16)(far < 1.0f ? 1 : (far > 65535.0f ? 65535 : (S32)far));
+            }
+        }
+    }
+}
+
 static void DynLight_AddGlow(const T_DYN_LIGHT *l, S32 lamp, const T_DYN_BOX *win) {
     const U8 *log = (const U8 *)Log, *scr = (const U8 *)Screen;
     const float zs = (float)Fill_Z_Fog_Far * (1.0f / 65536.0f);
@@ -1248,6 +1719,10 @@ static void DynLight_AddGlow(const T_DYN_LIGHT *l, S32 lamp, const T_DYN_BOX *wi
     T_DYN_GLOW *g;
     T_DYN_BOX b;
     S32 sx, sy, rs, glow, x, y;
+    if (s_iso) {
+        DynLight_IsoAddGlow(l, win);
+        return;
+    }
     if (l->glow <= 0 || s_nbGlow >= DYN_GLOWS || !DynLight_Emitter(l, DYN_GLOW_SCALE, &sx, &sy, &rs))
         return;
     if (lamp && sx >= win->x0 && sx <= win->x1 && sy >= win->y0 && sy <= win->y1 &&
@@ -1278,9 +1753,15 @@ static void DynLight_AddGlow(const T_DYN_LIGHT *l, S32 lamp, const T_DYN_BOX *wi
     }
 }
 
+/* Whether the static lights (the lamps outdoors) light this frame: outdoors
+   at night once baked; indoors there are none. */
+static S32 DynLight_StaticOn(void) {
+    return !s_iso && DynLight_Night() && s_staticValid;
+}
+
 /* Level 2's glows, from the frame before the moving lights change it. */
 static void DynLight_Glows(const T_DYN_BOX *win) {
-    const S32 night = DynLight_Night() && s_staticValid;
+    const S32 night = DynLight_StaticOn();
     S32 k;
     s_nbGlow = 0;
     if (!DynLight_ColourBuffers())
@@ -1295,7 +1776,7 @@ static void DynLight_Glows(const T_DYN_BOX *win) {
 /* Keeps what the colour stage reads: the scene, the tint of the lamps (at
    night) and of the moving lights. */
 static void DynLight_ColourFrame(const T_DYN_BOX *win) {
-    const S32 night = DynLight_Night() && s_staticValid;
+    const S32 night = DynLight_StaticOn();
     S32 k, y;
     s_snapValid = 0;
     if (!DynLight_ColourBuffers())
@@ -1472,10 +1953,17 @@ static void DynLight_Crosses(const T_DYN_LIGHT *list, S32 n, const T_DYN_BOX *wi
     for (k = 0; k < n; k++) {
         const T_DYN_LIGHT *l = &list[k];
         S32 sx, sy;
-        if (l->z <= (float)NearClip)
-            continue;
-        sx = XCentre + (S32)(l->x * (float)LFactorX / l->z);
-        sy = YCentre - (S32)(l->y * (float)LFactorY / l->z);
+        if (s_iso) {
+            float fx, fy;
+            DynLight_IsoProject(l->x, l->y, l->z, s_isoCamX, s_isoCamY, s_isoCamZ, s_isoXC, s_isoYC, &fx, &fy);
+            sx = (S32)floorf(fx);
+            sy = (S32)floorf(fy);
+        } else {
+            if (l->z <= (float)NearClip)
+                continue;
+            sx = XCentre + (S32)(l->x * (float)LFactorX / l->z);
+            sy = YCentre - (S32)(l->y * (float)LFactorY / l->z);
+        }
         if (sx - 6 < win->x0 || sx + 6 > win->x1 || sy - 6 < win->y0 || sy + 6 > win->y1)
             continue;
         for (i = -6; i <= 6; i++) {
@@ -1492,14 +1980,20 @@ void DynLight_MovingPass(void) {
     s_snapValid = 0;
     if (!DynLight)
         return;
-    if (CubeMode != CUBE_EXTERIEUR) { /* no depth indoors: the light waits for the next exterior */
+    s_iso = CubeMode != CUBE_EXTERIEUR;
+    if (s_iso) {
+        /* Indoors the room's bricks give the positions (DynLight_IsoBegin):
+           the exteriors' Z-buffer memory holds the bricks themselves. */
         s_staticValid = 0;
-        s_zValid = 0; /* the Z-buffer's memory holds the bricks indoors */
-        return;
+        s_zValid = 0;
+        if (!DynLight_IsoReady() || !DynLight_Surf())
+            return;
+        DynLight_IsoColumns();
+    } else {
+        if (!DynLight_Buffers() || !DynLight_Surf())
+            return;
+        DynLight_Columns();
     }
-    if (!DynLight_Buffers() || !DynLight_Surf())
-        return;
-    DynLight_Columns();
     win.x0 = ClipWindowXMin;
     win.y0 = ClipWindowYMin;
     win.x1 = ClipWindowXMax;
@@ -1527,9 +2021,15 @@ void DynLight_MovingPass(void) {
     DynLight_GatherMoving();
     DynLight_Clear(&s_movAcc);
     for (k = 0; k < s_nbMoving; k++) {
-        DynLight_AddPool(&s_movAcc, &s_moving[k], &win, 1, &u);
-        if (DynLight == 1)
-            DynLight_AddHalo(&s_movAcc, &s_moving[k], &win, 1, &u);
+        if (s_iso) {
+            DynLight_IsoAddPool(&s_movAcc, &s_moving[k], &win, 1, &u);
+            if (DynLight == 1)
+                DynLight_IsoAddHalo(&s_movAcc, &s_moving[k], &win, 1, &u);
+        } else {
+            DynLight_AddPool(&s_movAcc, &s_moving[k], &win, 1, &u);
+            if (DynLight == 1)
+                DynLight_AddHalo(&s_movAcc, &s_moving[k], &win, 1, &u);
+        }
     }
     s_movAcc.box = u;
     if (DynLight == 2)

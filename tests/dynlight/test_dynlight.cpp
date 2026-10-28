@@ -97,6 +97,9 @@ static void test_the_surface_table_keeps_the_ramp(void) {
     }
     /* A mid colour climbs its ramp at the top level. */
     ASSERT_TRUE((lut[15 * 256 + 0x45] & 15) > 5);
+    /* The clear colour, an interior's void, stays black. */
+    for (S32 k = 0; k < 16; k++)
+        ASSERT_EQ_INT(0, lut[k * 256]);
 }
 
 static void test_the_falloff(void) {
@@ -300,6 +303,103 @@ static void test_the_tint_and_the_glow(void) {
     ASSERT_TRUE(DynLight_Screen(200, 128) < DynLight_Screen(100, 128) + 100); /* less where already bright */
 }
 
+/* A full brick's silhouette in its 48 x 38 box, as every brick of the game
+   fits in it. */
+static int iso_inside(S32 u, S32 v) {
+    const float du = (float)u - 23.5f;
+    const float a = du < 0 ? -du : du;
+    return u >= 0 && u <= 47 && a <= 2.0f * (float)(v + 1) && a + 2.0f * (float)v <= 76.0f;
+}
+
+static void test_a_brick_shows_three_faces(void) {
+    S32 count[3] = {0, 0, 0}, u, v, face;
+    for (v = 0; v < DYN_ISO_H; v++)
+        for (u = 0; u < DYN_ISO_W; u++)
+            if (iso_inside(u, v)) {
+                DynLight_IsoT3(u, v, &face);
+                count[face]++;
+            }
+    ASSERT_EQ_INT(576, count[DYN_ISO_TOP]); /* the diamond */
+    ASSERT_EQ_INT(360, count[DYN_ISO_PX]);  /* the right half below it */
+    ASSERT_EQ_INT(360, count[DYN_ISO_PZ]);  /* the left half */
+    /* The top's middle, and a side's foot. */
+    DynLight_IsoT3(23, 11, &face);
+    ASSERT_EQ_INT(DYN_ISO_TOP, face);
+    DynLight_IsoT3(40, 30, &face);
+    ASSERT_EQ_INT(DYN_ISO_PX, face);
+    DynLight_IsoT3(6, 30, &face);
+    ASSERT_EQ_INT(DYN_ISO_PZ, face);
+}
+
+/* Every pixel of a cell's silhouette, kept and read back, lands on the face
+   it shows, inside the cell, and projects back to its pixel: for cells and
+   cameras all over a room, at three sizes. */
+static void test_a_background_pixel_reads_back_its_point(void) {
+    static const S32 sizes[3][2] = {{640, 480}, {1920, 1080}, {1366, 768}};
+    U32 seed = 12345;
+    S32 n, checked = 0;
+    for (n = 0; n < 300; n++) {
+        const S32 W = sizes[n % 3][0], H = sizes[n % 3][1];
+        S32 cx, cy, cz, sx, sy, sz, u, v;
+        seed = seed * 1103515245u + 12345u;
+        cx = (S32)((seed >> 8) % 64);
+        seed = seed * 1103515245u + 12345u;
+        cz = (S32)((seed >> 8) % 64);
+        seed = seed * 1103515245u + 12345u;
+        cy = (S32)((seed >> 8) % 25);
+        seed = seed * 1103515245u + 12345u;
+        sx = cx - 6 + (S32)((seed >> 8) % 13);
+        sz = cz - 6 + (S32)((seed >> 12) % 13);
+        sy = cy - 3 + (S32)((seed >> 16) % 7);
+        {
+            const S32 camX = sx * 512, camY = sy * 256, camZ = sz * 512, xc = W / 2 - 9, yc = H / 2;
+            const S32 xs = 24 * ((cx - sx) - (cz - sz)) + W / 2 - 32; /* Map2Screen */
+            const S32 ys = 12 * ((cx - sx) + (cz - sz)) - 15 * (cy - sy) + H / 2 - 14;
+            for (v = 0; v < DYN_ISO_H; v++)
+                for (u = 0; u < DYN_ISO_W; u++) {
+                    float X, Y, Z, px, py;
+                    S32 face, t3;
+                    if (!iso_inside(u, v))
+                        continue;
+                    t3 = DynLight_IsoT3(u, v, &face);
+                    DynLight_IsoPoint(DynLight_IsoS2(cx, cz, t3), xs + u, ys + v, camX, camY, camZ, xc, yc, &X,
+                                      &Y, &Z);
+                    if (face == DYN_ISO_TOP)
+                        ASSERT_TRUE(Y > 256.0f * (cy + 1) - 2.0f && Y < 256.0f * (cy + 1) + 2.0f);
+                    else if (face == DYN_ISO_PX)
+                        ASSERT_TRUE(X > 512.0f * (cx + 1) - 2.0f && X < 512.0f * (cx + 1) + 2.0f);
+                    else
+                        ASSERT_TRUE(Z > 512.0f * (cz + 1) - 2.0f && Z < 512.0f * (cz + 1) + 2.0f);
+                    ASSERT_TRUE(X > 512.0f * cx - 2.0f && X < 512.0f * (cx + 1) + 2.0f);
+                    ASSERT_TRUE(Z > 512.0f * cz - 2.0f && Z < 512.0f * (cz + 1) + 2.0f);
+                    ASSERT_TRUE(Y > 256.0f * cy - 2.0f && Y < 256.0f * (cy + 1) + 2.0f);
+                    /* An object at that point is drawn half a pixel left of
+                       the brick's pixel and a pixel below its top edge. */
+                    DynLight_IsoProject(X, Y, Z, camX, camY, camZ, xc, yc, &px, &py);
+                    ASSERT_TRUE(px > (float)(xs + u) - 1.0f && px < (float)(xs + u) + 0.01f);
+                    ASSERT_TRUE(py > (float)(ys + v) + 0.5f && py < (float)(ys + v) + 1.5f);
+                    checked++;
+                }
+        }
+    }
+    ASSERT_EQ_INT(300 * 1296, checked);
+}
+
+static void test_the_view_and_the_faces_take_the_light(void) {
+    /* Nearer the viewer along (1, 0.8, 1) is larger. */
+    ASSERT_TRUE(DynLight_IsoNear(1000.0f, 0.0f, 1000.0f) > DynLight_IsoNear(500.0f, 0.0f, 500.0f));
+    ASSERT_TRUE(DynLight_IsoNear(0.0f, 1000.0f, 0.0f) > DynLight_IsoNear(0.0f, 0.0f, 0.0f));
+    /* A face toward the light takes it all, one turned away none. */
+    ASSERT_EQ_INT(256, DynLight_IsoLambert(100.0f, 100.0f));
+    ASSERT_EQ_INT(0, DynLight_IsoLambert(-100.0f, 100.0f));
+    ASSERT_TRUE(DynLight_IsoLambert(0.0f, 100.0f) > 0 && DynLight_IsoLambert(0.0f, 100.0f) < 80);
+    ASSERT_EQ_INT(256, DynLight_IsoLambert(0.0f, 0.0f)); /* at the light */
+    /* A dark room takes the light whole, a bright one half. */
+    ASSERT_EQ_INT(256, DynLight_IsoStrength(20));
+    ASSERT_EQ_INT(128, DynLight_IsoStrength(200));
+    ASSERT_EQ_INT(192, DynLight_IsoStrength(80));
+}
+
 int main(void) {
     RUN_TEST(test_a_pool_is_found_at_its_centre);
     RUN_TEST(test_no_pool_on_plain_or_dim_ground);
@@ -314,6 +414,9 @@ int main(void) {
     RUN_TEST(test_the_fog_takes_the_light);
     RUN_TEST(test_the_dither_rounds_a_level);
     RUN_TEST(test_the_tint_and_the_glow);
+    RUN_TEST(test_a_brick_shows_three_faces);
+    RUN_TEST(test_a_background_pixel_reads_back_its_point);
+    RUN_TEST(test_the_view_and_the_faces_take_the_light);
     TEST_SUMMARY();
     return test_failures != 0;
 }

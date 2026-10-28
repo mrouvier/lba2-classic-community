@@ -5028,9 +5028,9 @@ S32 AffOneObject(T_SORT *pt) {
                         AND((FlagFlip == AFF_ALL_FLIP)
                                 OR(FlagFlip == AFF_ALL_NO_FLIP))) {
                     SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
+                    DynLight_Baking(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                     CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                               ClipXMin, ClipYMin, Screen);
-                    DynLight_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 }
 
                 if (DrawZVObjets) {
@@ -5156,9 +5156,9 @@ S32 AffOneObject(T_SORT *pt) {
                     AND((FlagFlip == AFF_ALL_FLIP)
                             OR(FlagFlip == AFF_ALL_NO_FLIP))) {
                 SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
+                DynLight_Baking(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                           ClipXMin, ClipYMin, Screen);
-                DynLight_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
             }
             if (DrawZVObjets) {
                 DrawZV(ptrobj);
@@ -5244,9 +5244,9 @@ S32 AffOneObject(T_SORT *pt) {
                     AND((FlagFlip == AFF_ALL_FLIP)
                             OR(FlagFlip == AFF_ALL_NO_FLIP))) {
                 SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
+                DynLight_Baking(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                           ClipXMin, ClipYMin, Screen);
-                DynLight_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
             }
             if (DrawZVObjets) {
                 DrawZV(ptrobj);

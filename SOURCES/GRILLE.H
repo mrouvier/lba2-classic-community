@@ -16,6 +16,14 @@ extern PTR_U8 BufMap;
 extern PTR_U8 TabBlock;
 extern PTR_U8 BufferBrick;
 
+/* Called after each brick of the room's grid is drawn into the frame
+   (AffGrille, AffGrilleLabyrinthe), with its packed brick number (the mask
+   in BufferMaskBrick), its sprite's corner (XScreen, YScreen) and its cell.
+   NULL but while the dynamic lighting rebuilds the room's positions
+   (DynLight_IsoBegin, SOURCES/DYNLIGHT.CPP). */
+typedef void(Func_GrilleBrickDrawn)(S32 brick, S32 xs, S32 ys, S32 x, S32 y, S32 z);
+extern Func_GrilleBrickDrawn *GrilleBrickDrawn;
+
 //-------------------------------------------------------------------
 extern Func_WorldColBrick WorldColBrick;
 

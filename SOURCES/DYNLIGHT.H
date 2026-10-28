@@ -19,9 +19,9 @@ struct T_SETTING; /* SETTINGS.H; a pointer to a table needs no more */
  *   1, Dynamic: in the palette. The street lamps of an island lit at night
  *      cast a pool on the ground and the walls around them, baked into the
  *      background on each full redraw with a halo about each globe, and the
- *      magic ball and the spells light what they pass over, every frame. A
- *      palette pixel can only climb its own 16-shade ramp, so these pools are
- *      brightness, not colour.
+ *      magic ball, the spells and the flames light what they pass over,
+ *      every frame, outdoors and indoors. A palette pixel can only climb its
+ *      own 16-shade ramp, so these pools are brightness, not colour.
  *   2, Colour: the same pools, and a stage at present time, where the frame
  *      is turned from palette indices into true colour: the lights tint what
  *      they light in their own colour, and a glow in that colour surrounds
@@ -129,8 +129,10 @@ static inline S32 DynLight_Luma(const U8 *rgb) {
    entry of c's own 16-shade ramp, at or above c's step, whose luma is closest
    to luma(c) brightened by k/15 of a gain and a lift. Level 0 leaves every
    colour as it is, and every level keeps a colour in its ramp, so the fog and
-   shade tables that index by ramp still read it right. `pal` is 768 bytes of
-   8-bit RGB. */
+   shade tables that index by ramp still read it right. Colour 0, the clear
+   colour (the void about an interior's room), is left black: its ramp holds
+   the primaries, and climbing it would turn the void red. `pal` is 768 bytes
+   of 8-bit RGB. */
 #define DYN_LIGHT_GAIN 256 /* luma * (1 + gain/256 * k/15) */
 #define DYN_LIGHT_LIFT 40  /* + lift * k/15 */
 static inline void DynLight_BuildSurf(const U8 *pal, U8 *lut) {
@@ -138,7 +140,8 @@ static inline void DynLight_BuildSurf(const U8 *pal, U8 *lut) {
     for (c = 0; c < 256; c++)
         lut[c] = (U8)c;
     for (k = 1; k < 16; k++) {
-        for (c = 0; c < 256; c++) {
+        lut[k * 256] = 0; /* the clear colour, the void about a room: it stays black */
+        for (c = 1; c < 256; c++) {
             const S32 luma = DynLight_Luma(pal + c * 3);
             const S32 target = luma + (luma * DYN_LIGHT_GAIN * k) / (256 * 15) + (DYN_LIGHT_LIFT * k) / 15;
             S32 best = c, bestErr = 0x7FFFFFFF;
@@ -380,6 +383,107 @@ static inline U32 DynLight_Screen(U32 c, S32 g) {
     return c + (((255 - c) * (U32)g) >> 8);
 }
 
+/* Interiors. They are drawn from isometric bricks, with no Z-buffer (its
+   memory holds the room's grid and bricks), so the background's position is
+   rebuilt from the bricks themselves while they are drawn.
+
+   The projection (LongProjectPointIso), with x' = X - CameraX and y', z'
+   likewise: Xp = XCentre + (3(x'-z') >> 6), Yp = YCentre + 1 + ((6(x'+z') -
+   15y') >> 8). It looks along (1, 0.8, 1): every point (5, 4, 5)k from a
+   point lands on its pixel, and the one drawn there is the one with the
+   largest X + 0.8Y + Z. A brick of cell (cx, cy, cz), 512 x 256 x 512 world
+   units, is drawn with its sprite's corner at the projection of the cell's
+   low corner less (23, 15) (Map2Screen), and every opaque pixel of every
+   brick of the game lies inside the cell's silhouette: its top face, its
+   face toward +x (the sprite's right half) or toward +z (its left half). So
+   a pixel's position is its cell's plus where it sits in the 48 x 38 sprite,
+   whatever the camera and the resolution.
+
+   DynLight_IsoT3: the face a pixel (u, v) of a cell's sprite shows, and
+   T3 = 3((X + Z) - 512(cx + cz)) of its point, which grows toward the
+   viewer. The eye's ray enters the cell through the face whose plane it
+   crosses last of the three on its way in, the one with the least T3:
+   T3 = min(128(v + 1), 3072 - |64u - 1504|). */
+#define DYN_ISO_TOP 0 /* the face toward +y */
+#define DYN_ISO_PX 1  /* toward +x */
+#define DYN_ISO_PZ 2  /* toward +z */
+#define DYN_ISO_W 48  /* a brick sprite's box, from its corner */
+#define DYN_ISO_H 38
+static inline S32 DynLight_IsoT3(S32 u, S32 v, S32 *face) {
+    const S32 d = 64 * u - 1504;
+    const S32 side = 3072 - (d < 0 ? -d : d);
+    const S32 top = 128 * (v + 1);
+    if (top <= side) {
+        *face = DYN_ISO_TOP;
+        return top;
+    }
+    *face = u >= 24 ? DYN_ISO_PX : DYN_ISO_PZ;
+    return side;
+}
+
+/* What a background pixel keeps of its point: (X + Z) / 2, rounded, which
+   fits 16 bits (X and Z run 0..32768). */
+static inline U16 DynLight_IsoS2(S32 cx, S32 cz, S32 t3) {
+    return (U16)((1536 * (cx + cz) + t3 + 3) / 6);
+}
+#define DYN_ISO_NONE 0xFFFF /* no brick there */
+
+/* The world point the background pixel (px, py) shows, from its kept
+   (X + Z) / 2 and the camera and centre it was drawn with: X - Z from the
+   column (the brick's pixel centre, half a pixel left of an object's), Y
+   from the row and X + Z. */
+static inline void DynLight_IsoPoint(S32 s2, S32 px, S32 py, S32 camX, S32 camY, S32 camZ, S32 xc, S32 yc,
+                                     float *X, float *Y, float *Z) {
+    const float S = 2.0f * (float)s2;
+    const float D = (64.0f * (float)(px - xc) - 32.0f) / 3.0f + (float)(camX - camZ);
+    *X = 0.5f * (S + D);
+    *Z = 0.5f * (S - D);
+    *Y = (float)camY + (6.0f * (S - (float)(camX + camZ)) - 256.0f * (float)(py - yc)) / 15.0f;
+}
+
+/* Where a world point is drawn, as LongProjectPointIso puts it, unrounded. */
+static inline void DynLight_IsoProject(float X, float Y, float Z, S32 camX, S32 camY, S32 camZ, S32 xc, S32 yc,
+                                       float *sx, float *sy) {
+    const float x = X - (float)camX, y = Y - (float)camY, z = Z - (float)camZ;
+    *sx = (float)xc + 3.0f * (x - z) / 64.0f;
+    *sy = (float)yc + 1.0f + (6.0f * (x + z) - 15.0f * y) / 256.0f;
+}
+
+/* How near the viewer a point is: larger is nearer, along the view; a step
+   of one world unit toward the viewer adds about 1.625. */
+static inline float DynLight_IsoNear(float X, float Y, float Z) {
+    return X + 0.8f * Y + Z;
+}
+
+/* How strong the lights are in an interior, in 256ths, from the mean luma of
+   its bricks: full in a room as dark as a night outdoors (48 and under),
+   half in the brightest (112 and over), between in proportion. Interiors
+   have no time of day; their darkness is their own. */
+static inline S32 DynLight_IsoStrength(S32 ambient) {
+    if (ambient <= 48)
+        return 256;
+    if (ambient >= 112)
+        return 128;
+    return 256 - (ambient - 48) * 2;
+}
+
+/* A sphere of radius r on screen: an ellipse of half-width 3r/sqrt(2)/32 and
+   half-height r sqrt(297)/256 about the projection of its centre. */
+#define DYN_ISO_RX 0.06630f
+#define DYN_ISO_RY 0.06732f
+
+/* How much of a point light a face takes: the cosine between its normal and
+   the light, wrapped by DYN_ISO_WRAP so the light rounds the edges a little;
+   a face turned away, such as a wall's visible side lit from the room behind
+   it, takes none. `dot` is the normal's dot with the point-to-light vector,
+   `dist` that vector's length. 0..256. */
+#define DYN_ISO_WRAP 0.3f
+static inline S32 DynLight_IsoLambert(float dot, float dist) {
+    const float c = dist > 0.0f ? dot / dist : 1.0f;
+    const float w = (c + DYN_ISO_WRAP) / (1.0f + DYN_ISO_WRAP);
+    return w <= 0.0f ? 0 : (w >= 1.0f ? 256 : (S32)(w * 256.0f));
+}
+
 /* Engine hooks (DYNLIGHT.CPP). Each returns at once while DynLight is 0, but
    DynLight_CubeLoaded, which keeps the cube's number for when it is turned on.
    The lamps of a cube are found the first time it is drawn with the light on
@@ -396,9 +500,15 @@ extern void DynLight_BakeBackground(void); /* EXTFUNC.CPP: the lamps into the ba
    lamps' pixels again, whatever the redraw left there. */
 extern void DynLight_Unlight(S32 x0, S32 y0, S32 x1, S32 y1);
 extern void DynLight_Refreshed(S32 x0, S32 y0, S32 x1, S32 y1);
-/* A box of the background copy a background object was baked into: the lamps
-   leave the object's pixels as they are from then on, as on a full redraw. */
-extern void DynLight_Baked(S32 x0, S32 y0, S32 x1, S32 y1);
+/* A box a background object is about to be baked into the background copy
+   from (OBJECT.CPP, before the copy, where the frame still tells the object
+   from the background): the lamps leave the object's pixels as they are from
+   then on, as on a full redraw, and indoors they show no brick any more. */
+extern void DynLight_Baking(S32 x0, S32 y0, S32 x1, S32 y1);
+/* INTEXT.CPP, RefreshGrille: an interior's bricks are about to be drawn, and
+   have been: in between each brick drawn leaves its position (GRILLE.H). */
+extern void DynLight_IsoBegin(void);
+extern void DynLight_IsoEnd(void);
 /* OBJECT.CPP, AffScene: the moving lights over the frame's background, after
    the scene and before the incrusts; at level 2 the frame the colour stage
    reads is kept here too. */

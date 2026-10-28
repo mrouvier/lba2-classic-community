@@ -77,14 +77,16 @@ The setting is recorded: the wind moves the drops, the streak decides where a dr
 gfx_rain_scale 1; gfx_rain_fx 1
 ```
 
-**Lighting** adds point lights to the exteriors. The 1997 engine lights a scene's 3D bodies from one direction, carries the terrain's light baked into each cube (`MapIntensity`, the low nibble of each vertex), draws its sprites as they are, and keeps every colour a palette index. With the setting on ([SOURCES/DYNLIGHT.H](../SOURCES/DYNLIGHT.H)):
+**Lighting** adds point lights to the exteriors and the interiors. The 1997 engine lights a scene's 3D bodies from one direction, carries the terrain's light baked into each cube (`MapIntensity`, the low nibble of each vertex), draws its sprites as they are, and keeps every colour a palette index. With the setting on ([SOURCES/DYNLIGHT.H](../SOURCES/DYNLIGHT.H)):
 
 - **1, Dynamic.** At night, when the fog colour is dark as under the Citadel's storm, the street lamps light the ground and the walls about them. The magic ball, its trail, the lightning and protection spells, the impacts' fire, a burst of bright coloured particles and the hero burning in lava light what they pass over, by day at half strength. A light raises each pixel up its own 16-step ramp (`DynLight_BuildSurf`), so the fog and shade tables still read it. The level falls off with the distance in space, rebuilt from the Z-buffer, fades in the fog as the fillers' bands do, and an ordered dither rounds it to the 16 steps. The lamps are baked into the background on each full redraw with a halo about each globe (`DynLight_BakeBackground`), and again where the shallows or the moving sea are redrawn between full redraws (`DynLight_Refreshed`). The moving lights are drawn over the background each frame before any text, and erased with the frame's other moving boxes (`DynLight_MovingPass`).
 - **2, Colour.** The same pools, and a stage at present time, on the frame converted to true colour (`DynLight_PresentStage`, which `SetPresentLightCallback` runs before the console and the touch pad). The lights tint what they light toward their colour, a lamp's warm, and a soft glow surrounds the globes and the moving lights in place of the palette's halo. It covers what lies behind the light, never an actor or a nearer wall, and a lamp's goes when an actor hides its globe. The glow takes its colour from the palette the frame was converted with, so a fade or a lightning flash takes it along. The stage lights only the pixels that still show the scene as drawn, never the text or the menus, and stands down when most of the frame shows something else: a menu, the holomap, a film.
 
 The lamps are found in the light the 1997 artists painted under them: a pool that is filled, ringed with dark ground and centred on the decor (`DynLight_LampAt`). On the 14 islands this keeps the Citadel's nine street lamps and no other decor. A lamp's colour is its globe's, the body's highest polygon, and its pool reaches one and a half times the globe's height. A cube's lamps are found the first time it is drawn with the light on, and kept until the next island.
 
-What it does not do. Indoors there is no Z-buffer, its memory holding the bricks, so the light waits for the next exterior. The actors are not lit in the palette; the ground and walls around them are, and at level 2 the tint reaches an actor as it reaches what is behind it. The lighthouse's lantern and the lights painted into textures are not found.
+**Interiors.** Indoors there is no Z-buffer: its memory holds the room's grid and bricks. The room's positions are rebuilt from the bricks as they are drawn (`DynLight_IsoBegin`, which listens to `GrilleBrickDrawn` in [GRILLE.H](../SOURCES/GRILLE.H) while the grid is drawn). Every opaque pixel of every brick of the game lies inside its cell's silhouette, on the top face, the face toward +x or the face toward +z, so the cell and the pixel's place in the 48x38 sprite give its point, whatever the camera and the resolution (`DynLight_IsoT3`). A pixel keeps (X + Z) / 2 and its face, and its column and row give the rest (`DynLight_IsoPoint`). A light then lights a floor as a floor and a wall as a wall: by the distance in space, times how much the face takes of it (`DynLight_IsoLambert`), so a wall's visible side takes nothing from a light in the room behind it. The magic ball, the spells, the fire and the candle flames, which are flows of bright dots, light the room, as strongly as the room is dark: in full in a room as dark as a night outdoors, at half in the brightest (`DynLight_IsoStrength`, from the mean luma of its bricks). A flow's light reaches farther the more dots it has alive, so a candle lights less far than the magic ball's burst. An object baked into the background shows no brick, and the lights leave it as drawn, as they leave the room's void (`DynLight_Baking`); outdoors only the lamps leave such an object unlit, the moving lights lighting it as the ground behind it. The colour level tints and glows indoors as outdoors, over the bricks.
+
+What it does not do. The actors are not lit in the palette; the ground and walls around them are, and at level 2 the tint reaches an actor as it reaches what is behind it. The lighthouse's lantern and the lights painted into textures are not found, nor any static light indoors (the lava, the painted lamps). Indoors a prop that does not fill its cell (a bench, a table, a rail) takes its cell's box surface, and so does a slope or a stair step: the collision shapes are not read.
 
 Measured at 1920x1080 at the Citadel's town start, at night, with seven lamps gathered and three of them covering the frame:
 
@@ -93,6 +95,14 @@ Measured at 1920x1080 at the Citadel's town start, at night, with seven lamps ga
 | A frame that redraws only its objects | 2.2 ms | 2.2 ms | 3.6 ms |
 | The magic ball in flight, the light's own pass | | 0.2 to 0.4 ms | 0.4 to 0.6 ms |
 | Each full redraw, the lamps' bake | | about 4 ms | about 4 ms |
+
+Indoors, at 1920x1080 in the school's hall (cube 27, four candles in view):
+
+| | Lighting off | Dynamic | Colour |
+|---|---|---|---|
+| A frame that redraws only its objects | 2.1 ms | 2.7 ms | 2.9 ms |
+| The magic ball and the candles, the light's own pass | | about 1 ms | about 1.1 ms |
+| Each full redraw, the room's positions | | about 2 ms | about 2 ms |
 
 Pixels only: the passes read the scene and write the frame, never game state, and draw nothing from the shared random stream, so recordings do not carry the setting. `screenshot presented` saves the frame as presented, with the colour stage; `screenshot` and `--screenshot` save the indexed frame without it. `gfx_dynlight_debug 1` marks each light found with a cross.
 
