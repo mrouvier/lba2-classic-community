@@ -108,13 +108,14 @@ static S32 s_tintStaticValid = 0;
    drawn, with the camera and the centre they were drawn with. */
 static S32 s_iso = 0;         /* this frame lights an interior */
 static U16 *s_isoS = NULL;    /* (X + Z) / 2, DYN_ISO_NONE where no brick shows */
-static U8 *s_isoF = NULL;     /* the face: the top, +x, +z or a slope (DynLight_IsoDot) */
+static U8 *s_isoF = NULL;     /* the face (the top, +x, +z or a slope, DynLight_IsoDot), and lava */
 static float *s_isoD = NULL;  /* X - Z of each column's pixels */
 static S32 s_isoValid = 0;    /* the frame's background is the one described */
 static S32 s_isoBuilding = 0; /* between DynLight_IsoBegin and DynLight_IsoEnd */
 static S32 s_isoCamX, s_isoCamY, s_isoCamZ, s_isoXC, s_isoYC;
 static T_DYN_BOX s_isoClip;  /* the clip the bricks were drawn in */
 static S32 s_isoScale = 256; /* how strong the lights are in this room, 256ths */
+static S32 s_isoStatic = 0;  /* the background holds the room's static lights (DynLight_IsoStatics) */
 
 /* A street lamp: its pool reaches one and a half times the globe's height, so
    the ground under it takes a third of the light and the walls about it more;
@@ -279,25 +280,66 @@ void DynLight_GatherCube(void) {
    light follows. HQR_Get touches the cache's order, so each sprite is read
    once per palette. */
 #define DYN_SPRITES 512
-static U8 s_sprKnown[DYN_SPRITES];
-static U8 s_sprColour[DYN_SPRITES];
-static U8 s_sprLuma[DYN_SPRITES];
+static U8 s_sprKnown[2][DYN_SPRITES]; /* by the bank: SPRIRAW, then SPRITES */
+static U8 s_sprColour[2][DYN_SPRITES];
+static U8 s_sprLuma[2][DYN_SPRITES];
 static S32 s_sprPalette = -1;
 
-static S32 DynLight_SpriteColour(S32 num, S32 *luma) {
-    if (num < 0 || num >= DYN_SPRITES || PtrPalCurrent == NULL || HQRPtrSpriteRaw == NULL)
+/* A sprite's colours, transparent ones left out: from SPRIRAW, whose
+   sprites are raw (0 is transparent), the extras' bank; or from SPRITES
+   (`runs`), the one PtrAffGraph draws a sprite >= 100 from, in AffGraph's
+   runs (DynLight_SpriteCanvas). */
+static S32 DynLight_SpritePixels(S32 num, S32 runs, U8 *out, S32 max) {
+    const U8 *bank, *spr;
+    S32 n = 0;
+    if (!runs) {
+        S32 i, size;
+        bank = HQRPtrSpriteRaw != NULL ? (const U8 *)HQR_Get(HQRPtrSpriteRaw, num) : NULL;
+        if (bank == NULL)
+            return 0;
+        spr = bank + ReadLE_U32(bank);
+        size = spr[0] * spr[1];
+        for (i = 0; i < size && n < max; i++)
+            if (spr[4 + i])
+                out[n++] = spr[4 + i];
+        return n;
+    }
+    bank = HQRPtrSprite != NULL ? (const U8 *)HQR_Get(HQRPtrSprite, num) : NULL;
+    if (bank == NULL)
+        return 0;
+    spr = bank + ReadLE_U32(bank);
+    {
+        const S32 dy = spr[1];
+        const U8 *p = spr + 4;
+        S32 r;
+        for (r = 0; r < dy; r++) {
+            S32 count = *p++;
+            while (count-- > 0) {
+                const S32 c = *p++, op = c >> 6, cnt = (c & 63) + 1;
+                S32 k;
+                if (op == 0)
+                    continue;
+                for (k = 0; k < cnt && n < max; k++)
+                    out[n++] = op == 1 ? p[k] : p[0];
+                p += op == 1 ? cnt : 1;
+            }
+        }
+    }
+    return n;
+}
+
+static S32 DynLight_SpriteColourIn(S32 num, S32 runs, S32 *luma) {
+    if (num < 0 || num >= DYN_SPRITES || PtrPalCurrent == NULL)
         return -1;
     if (s_sprPalette != IdxPalette) {
         memset(s_sprKnown, 0, sizeof(s_sprKnown));
         s_sprPalette = IdxPalette;
     }
-    if (!s_sprKnown[num]) {
-        const U8 *bank = (const U8 *)HQR_Get(HQRPtrSpriteRaw, num);
+    if (!s_sprKnown[runs][num]) {
+        static U8 px[256 * 256];
+        const S32 n = DynLight_SpritePixels(num, runs, px, (S32)sizeof(px));
         S32 best = 0, bestL = 0;
-        if (bank != NULL) {
-            const U8 *spr = bank + ReadLE_U32(bank);
-            const S32 n = spr[0] * spr[1];
-            const U8 *px = spr + 4;
+        {
             S32 i, sr = 0, sg = 0, sb = 0, cnt = 0, bestD = 0x7FFFFFFF;
             for (i = 0; i < n; i++)
                 if (px[i] && DynLight_Luma(PtrPalCurrent + 3 * px[i]) > bestL)
@@ -328,12 +370,22 @@ static S32 DynLight_SpriteColour(S32 num, S32 *luma) {
                 }
             }
         }
-        s_sprKnown[num] = 1;
-        s_sprColour[num] = (U8)best;
-        s_sprLuma[num] = (U8)bestL;
+        s_sprKnown[runs][num] = 1;
+        s_sprColour[runs][num] = (U8)best;
+        s_sprLuma[runs][num] = (U8)bestL;
     }
-    *luma = s_sprLuma[num];
-    return s_sprKnown[num] && s_sprLuma[num] ? s_sprColour[num] : -1;
+    *luma = s_sprLuma[runs][num];
+    return s_sprLuma[runs][num] ? s_sprColour[runs][num] : -1;
+}
+
+/* Whether a sprite's colour is read already, for this palette. */
+static S32 DynLight_SpriteKnown(S32 num, S32 runs) {
+    return num >= 0 && num < DYN_SPRITES && s_sprPalette == IdxPalette && s_sprKnown[runs][num];
+}
+
+/* An extra's sprite. */
+static S32 DynLight_SpriteColour(S32 num, S32 *luma) {
+    return DynLight_SpriteColourIn(num, 0, luma);
 }
 
 typedef struct {
@@ -346,11 +398,37 @@ static const T_DYN_KIND DynKindShield = {1100, 40, 24, 40, 40, 96};
 static const T_DYN_KIND DynKindFire = {2400, 160, 96, 120, 150, 220};
 static const T_DYN_KIND DynKindBurst = {2000, 128, 0, 0, 0, 160}; /* reach: see DynLight_GatherMoving */
 static const T_DYN_KIND DynKindHero = {3000, 176, 0, 0, 0, 256};
+static const T_DYN_KIND DynKindGlow = {2000, 128, 80, 90, 150, 200};
 
 /* The impacts' fire: the flash (139..142), the fireball (143..166) and the
    sparks (57..62). */
 static S32 DynLight_FireSprite(S32 num) {
     return (num >= 139 && num <= 166) || (num >= 57 && num <= 62);
+}
+
+/* The sprites an object shows that are a light of their own: a flame, a
+   crystal, a beacon, a glowing tube. */
+static S32 DynLight_GlowSprite(S32 num) {
+    return num == 144 || num == 157 || (num >= 194 && num <= 197) || num == 290 || (num >= 296 && num <= 300) ||
+           num == 334 || num == 335 || (num >= 378 && num <= 393) || (num >= 422 && num <= 424);
+}
+
+/* Whether an object's box is on screen indoors, any of it. */
+static S32 DynLight_IsoObjectShows(const T_OBJET *o) {
+    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    S32 k;
+    for (k = 0; k < 8; k++) {
+        float sx, sy;
+        DynLight_IsoProject((float)(o->Obj.X + ((k & 1) ? o->XMax : o->XMin)),
+                            (float)(o->Obj.Y + ((k & 2) ? o->YMax : o->YMin)),
+                            (float)(o->Obj.Z + ((k & 4) ? o->ZMax : o->ZMin)), CameraX, CameraY, CameraZ, XCentre,
+                            YCentre, &sx, &sy);
+        x0 = sx < x0 ? sx : x0;
+        y0 = sy < y0 ? sy : y0;
+        x1 = sx > x1 ? sx : x1;
+        y1 = sy > y1 ? sy : y1;
+    }
+    return x1 >= 0.0f && y1 >= 0.0f && x0 < (float)ModeDesiredX && y0 < (float)ModeDesiredY;
 }
 
 static void DynLight_AddMoving(S32 wx, S32 wy, S32 wz, const T_DYN_KIND *k, S32 scale, S32 colour) {
@@ -467,6 +545,29 @@ static void DynLight_GatherMoving(void) {
                 k.reach = DynKindBurst.reach;
             DynLight_AddMoving(sx / live, sy / live, sz / live, &k, (day * live) / f->NbDot, colour);
         }
+    }
+
+    /* Indoors, the objects that show a glowing sprite, at their middle, while
+       their light reaches the screen. A sprite's colour is read (HQR_Get) only
+       once its object's box is on screen, when the scene draws it too; until
+       then a light whose colour is not known yet waits for it. */
+    for (n = 0; s_iso && n < NbObjets; n++) {
+        const T_OBJET *o = &ListObjet[n];
+        const S32 num = o->Obj.Body.Num;
+        const S32 wx = o->Obj.X + (o->XMin + o->XMax) / 2, wy = o->Obj.Y + (o->YMin + o->YMax) / 2,
+                  wz = o->Obj.Z + (o->ZMin + o->ZMax) / 2;
+        const float mx = (float)DynKindGlow.reach * DYN_ISO_RX + 2.0f, my = (float)DynKindGlow.reach * DYN_ISO_RY + 2.0f;
+        const float w = (float)ModeDesiredX, h = (float)ModeDesiredY;
+        float sx, sy;
+        S32 luma = 0;
+        if (!(o->Flags & SPRITE_3D) || (o->Flags & (INVISIBLE | ANIM_3DS)) || !DynLight_GlowSprite(num))
+            continue;
+        DynLight_IsoProject((float)wx, (float)wy, (float)wz, CameraX, CameraY, CameraZ, XCentre, YCentre, &sx, &sy);
+        if (sx < -mx || sy < -my || sx > w + mx || sy > h + my)
+            continue;
+        if (!DynLight_SpriteKnown(num, 1) && !DynLight_IsoObjectShows(o))
+            continue;
+        DynLight_AddMoving(wx, wy, wz, &DynKindGlow, day, DynLight_SpriteColourIn(num, 1, &luma));
     }
 
     /* The hero burning in lava (OBJECT.CPP gives the body GEN_BODY_FEU). */
@@ -1108,19 +1209,25 @@ void DynLight_Baking(S32 x0, S32 y0, S32 x1, S32 y1) {
    DynLight_IsoSurfT3): per surface, each pixel's part of DynLight_IsoS2,
    (T3 + 3) / 6, to which a cell adds 256(cx + cz) (1536 is 6 x 256), and its
    face; the first is the whole cell, which every whole brick shows. A brick's
-   surface is found from its mask the first time it is drawn after
-   DynLight_IsoBegin (the bank LoadUsedBrick builds changes with the room),
-   and bricks of one surface share its table; past DYN_ISO_SURFS a brick shows
-   the whole cell. */
-#define DYN_ISO_SURFS 64
+   surface is found from its mask the first time the room draws it or places
+   a lamp on it, and kept for the room (DynLight_IsoRoom: the bank
+   LoadUsedBrick builds changes with the room); bricks of one surface share
+   its table, and past DYN_ISO_SURFS a brick shows the whole cell. */
+#define DYN_ISO_SURFS 128      /* a room shows up to 71 */
 #define DYN_ISO_BANK 2048      /* the bricks a room's bank holds at most (821 in the game) */
 #define DYN_ISO_HEADER_BLOCK 3 /* a block's dx, dy, dz before its cells (GRILLE.CPP's HEADER_BLOCK) */
+#define DYN_ISO_LAVA 0x80      /* a face byte's flag: the brick's cell is lava */
+#define DYN_ISO_FACE 0x07      /* a face byte's face */
 static U16 s_isoT6[DYN_ISO_SURFS][DYN_ISO_H][DYN_ISO_W];
 static U8 s_isoFaceOf[DYN_ISO_SURFS][DYN_ISO_H][DYN_ISO_W];
 static T_DYN_ISO_SURF s_isoSurf[DYN_ISO_SURFS];
 static S32 s_nbIsoSurf = 0;
-static U8 s_isoBrickSurf[DYN_ISO_BANK]; /* a brick's surface + 1, 0 until it is drawn */
+static U8 s_isoBrickSurf[DYN_ISO_BANK]; /* a brick's surface + 1, 0 until the room meets it */
 static U8 s_isoPu[DYN_ISO_W * DYN_ISO_H], s_isoPv[DYN_ISO_W * DYN_ISO_H];
+
+static S32 DynLight_LavaCode(S32 code) {
+    return code == CJ_LAVE || code == CJ_ANIMATED_LAVE;
+}
 
 static void DynLight_IsoBuildSurf(S32 k, const T_DYN_ISO_SURF *surf) {
     S32 u, v, face;
@@ -1194,6 +1301,135 @@ static S32 DynLight_IsoBrickSurf(S32 brick, S32 col, const U8 *mask) {
     return k;
 }
 
+/* The lamps painted into a room's bricks (DynLight_LampBlob), found the
+   first time a brick is met, and the room's lava. A sprite the test takes
+   for a lamp that is not one (a teapot, a white wall's sheen, a bowl) is
+   named in DynLightNoLamp by its colours (DynLight_CanvasHash). */
+#define DYN_ISO_LAMP_BRICKS 64       /* lamp bricks a room may hold; 4 in the game's busiest */
+static U8 s_isoLampOf[DYN_ISO_BANK]; /* 0 not looked at, 1 none, 2 + k s_isoLampBlob[k] */
+static T_DYN_LAMP_BLOB s_isoLampBlob[DYN_ISO_LAMP_BRICKS];
+static S32 s_nbIsoLampBlob = 0;
+static const U32 DynLightNoLamp[] = {0x737035e1, 0xddc3d81e, /* teapots */
+                                     0x25091a7e, 0xb0b9d30d, /* white walls */
+                                     0x51feea90, 0xbf0dabf1, /* grey blocks' tops */
+                                     0x83d6ba1f,             /* a bowl */
+                                     0x1c9d508b,             /* a pipe's joint */
+                                     0xfe21a340, 0x5f94c64f /* two more bright spots */};
+/* A brick painted as the lava is (at least DYN_LAVA_LIKE of its pixels in the
+   ramps the room's lava cells are painted with) is lava wherever it stands:
+   the artists drew the lava's edges with cells of other codes. */
+#define DYN_LAVA_LIKE 0.85f
+#define DYN_LAVA_RAMP 0.05f            /* of the lava's pixels, for a ramp to be the lava's */
+static U8 s_isoLavaLike[DYN_ISO_BANK]; /* 0 not looked at, 1 no, 2 yes */
+static U16 s_lavaRamps = 0;            /* the lava's ramps, a bit each */
+static U8 s_lavaColour = 0;            /* the lava's own colour, a palette index, 0 until it shows */
+static U32 s_isoRoom = 0;              /* the bank and palette the caches are for */
+static S32 s_isoRoomKnown = 0;
+static S32 s_lavaKnown = 0; /* s_lava and its field are for this room */
+
+static S32 DynLight_IsoBankSize(void) {
+    return BufferBrick != NULL ? (S32)(ReadLE_U32(BufferBrick) / 4) - 1 : 0;
+}
+
+/* The ramps the room's lava cells are painted with (s_lavaRamps). */
+static void DynLight_IsoLavaRamps(void) {
+    static U8 idx[DYN_ISO_W * DYN_ISO_H], opq[DYN_ISO_W * DYN_ISO_H];
+    const S32 bank = DynLight_IsoBankSize();
+    S32 hist[16], total = 0, x, y, z, k;
+    memset(s_isoLavaLike, 0, sizeof(s_isoLavaLike));
+    memset(hist, 0, sizeof(hist));
+    s_lavaRamps = 0;
+    for (z = 0; z < SIZE_CUBE_Z; z++)
+        for (x = 0; x < SIZE_CUBE_X; x++)
+            for (y = 0; y < SIZE_CUBE_Y; y++) {
+                const U8 *cell = BufCube + x * SIZE_CUBE_Y * 2 + y * 2 + z * SIZE_CUBE_X * SIZE_CUBE_Y * 2, *blk;
+                S32 nb, i;
+                if (!cell[0])
+                    continue;
+                blk = GetAdrBlock(cell[0] - 1);
+                if (cell[1] >= blk[0] * blk[1] * blk[2])
+                    continue;
+                blk += DYN_ISO_HEADER_BLOCK;
+                nb = ReadLE_U16(blk + 4 * cell[1] + 2);
+                if (!DynLight_LavaCode(blk[1] >> 4) || nb < 1 || nb > bank || nb == ForbidenBrick ||
+                    nb - 1 >= DYN_ISO_BANK || s_isoLavaLike[nb - 1])
+                    continue;
+                s_isoLavaLike[nb - 1] = 2; /* a lava cell's own */
+                DynLight_SpriteCanvas(BufferBrick + ReadLE_U32(BufferBrick + 4 * (nb - 1)), idx, opq);
+                for (i = 0; i < DYN_ISO_W * DYN_ISO_H; i++)
+                    if (opq[i]) {
+                        hist[idx[i] >> 4]++;
+                        total++;
+                    }
+            }
+    for (k = 0; k < 16; k++)
+        if (total && (float)hist[k] >= DYN_LAVA_RAMP * (float)total)
+            s_lavaRamps |= (U16)(1 << k);
+}
+
+/* Whether brick `brick` is painted as the lava is. */
+static S32 DynLight_IsoLavaLike(S32 brick) {
+    if (!s_lavaRamps || brick < 0 || brick >= DYN_ISO_BANK)
+        return 0;
+    if (!s_isoLavaLike[brick]) {
+        static U8 idx[DYN_ISO_W * DYN_ISO_H], opq[DYN_ISO_W * DYN_ISO_H];
+        const S32 n = DynLight_SpriteCanvas(BufferBrick + ReadLE_U32(BufferBrick + 4 * brick), idx, opq);
+        S32 i, in = 0;
+        for (i = 0; i < DYN_ISO_W * DYN_ISO_H; i++)
+            in += opq[i] && ((s_lavaRamps >> (idx[i] >> 4)) & 1);
+        s_isoLavaLike[brick] = n && (float)in >= DYN_LAVA_LIKE * (float)n ? 2 : 1;
+    }
+    return s_isoLavaLike[brick] == 2;
+}
+
+/* The caches hold for a room's bank and palette: InitGrille rebuilds the
+   bank for each room (LoadUsedBrick), and the lamps are found by luma. */
+static void DynLight_IsoRoom(void) {
+    const S32 n = DynLight_IsoBankSize();
+    U32 h = 2166136261u ^ (U32)NumCube;
+    S32 i;
+    for (i = 0; i <= n; i++) {
+        h ^= ReadLE_U32(BufferBrick + 4 * i);
+        h *= 16777619u;
+    }
+    for (i = 0; PtrPalCurrent != NULL && i < 768; i++) {
+        h ^= PtrPalCurrent[i];
+        h *= 16777619u;
+    }
+    if (s_isoRoomKnown && h == s_isoRoom)
+        return;
+    s_isoRoom = h;
+    s_isoRoomKnown = 1;
+    DynLight_IsoResetSurfs();
+    memset(s_isoLampOf, 0, sizeof(s_isoLampOf));
+    s_nbIsoLampBlob = 0;
+    s_lavaKnown = 0;
+    s_lavaColour = 0;
+    DynLight_IsoLavaRamps();
+}
+
+/* The lamp brick `brick` shows, -1 for none. */
+static S32 DynLight_IsoLampOf(S32 brick) {
+    if (brick < 0 || brick >= DYN_ISO_BANK || PtrPalCurrent == NULL)
+        return -1;
+    if (!s_isoLampOf[brick]) {
+        static U8 idx[DYN_ISO_W * DYN_ISO_H], opq[DYN_ISO_W * DYN_ISO_H];
+        const S32 n = DynLight_SpriteCanvas(BufferBrick + ReadLE_U32(BufferBrick + 4 * brick), idx, opq);
+        const U32 h = DynLight_CanvasHash(idx, opq);
+        T_DYN_LAMP_BLOB b;
+        size_t k;
+        s_isoLampOf[brick] = 1;
+        for (k = 0; k < sizeof(DynLightNoLamp) / sizeof(DynLightNoLamp[0]); k++)
+            if (DynLightNoLamp[k] == h)
+                return -1;
+        if (s_nbIsoLampBlob < DYN_ISO_LAMP_BRICKS && DynLight_LampBlob(idx, opq, n, PtrPalCurrent, &b)) {
+            s_isoLampBlob[s_nbIsoLampBlob] = b;
+            s_isoLampOf[brick] = (U8)(2 + s_nbIsoLampBlob++);
+        }
+    }
+    return s_isoLampOf[brick] >= 2 ? s_isoLampOf[brick] - 2 : -1;
+}
+
 /* GrilleBrickDrawn while the room is drawn: the brick's opaque pixels, read
    from its mask (the CopyMask layout: per row a count, then runs to skip and
    to write, the first a skip), inside the clip AffGraph drew it in. The
@@ -1202,14 +1438,21 @@ static S32 DynLight_IsoBrickSurf(S32 brick, S32 col, const U8 *mask) {
 static void DynLight_IsoBrick(S32 brick, S32 xs, S32 ys, S32 x, S32 y, S32 z) {
     const U8 *m, *cell;
     S32 dy, hx, hy, r, base, x0, x1, col = 1, k;
+    U8 lava = 0;
     const S32 cy0 = ClipYMin, cy1 = ClipYMax;
     if (!s_isoBuilding || BufferMaskBrick == NULL || brick < 0)
         return;
     base = 256 * (x + z);
-    /* The cell's collision shape, as WorldColBrick reads it. */
+    /* The cell's collision shape and its block's game code, as WorldColBrick
+       and WorldCodeBrick read them. */
     cell = BufCube + x * SIZE_CUBE_Y * 2 + y * 2 + z * SIZE_CUBE_X * SIZE_CUBE_Y * 2;
-    if (cell[0])
-        col = GetAdrBlock(cell[0] - 1)[DYN_ISO_HEADER_BLOCK + 4 * cell[1]];
+    if (cell[0]) {
+        const U8 *blk = GetAdrBlock(cell[0] - 1) + DYN_ISO_HEADER_BLOCK;
+        col = blk[4 * cell[1]];
+        lava = DynLight_LavaCode(blk[1] >> 4) ? DYN_ISO_LAVA : 0;
+    }
+    if (DynLight_IsoLavaLike(brick))
+        lava = DYN_ISO_LAVA;
     /* The columns a pixel may take: the clip AffGraph drew in, and the box. */
     x0 = ClipXMin > xs ? ClipXMin : xs;
     x1 = ClipXMax < xs + DYN_ISO_W - 1 ? ClipXMax : xs + DYN_ISO_W - 1;
@@ -1239,7 +1482,7 @@ static void DynLight_IsoBrick(S32 brick, S32 xs, S32 ys, S32 x, S32 y, S32 z) {
                 b = px + run - 1 < x1 ? px + run - 1 : x1;
                 for (q = a; q <= b; q++) {
                     ps[q] = (U16)(base + t6[q - xs]); /* DynLight_IsoS2 */
-                    pf[q] = fc[q - xs];
+                    pf[q] = (U8)(fc[q - xs] | lava);
                 }
             }
             px += run;
@@ -1254,7 +1497,7 @@ void DynLight_IsoBegin(void) {
     GrilleBrickDrawn = NULL;
     if (!DynLight || CubeMode != CUBE_INTERIEUR || !DynLight_Buffers())
         return;
-    DynLight_IsoResetSurfs();
+    DynLight_IsoRoom();
     for (y = 0; y < s_h; y++)
         memset(s_isoS + TabOffLine[y], 0xFF, sizeof(U16) * (size_t)s_w);
     s_isoCamX = CameraX;
@@ -1266,11 +1509,14 @@ void DynLight_IsoBegin(void) {
     s_isoClip.y0 = ClipYMin < 0 ? 0 : ClipYMin;
     s_isoClip.x1 = ClipXMax > s_w - 1 ? s_w - 1 : ClipXMax;
     s_isoClip.y1 = ClipYMax > s_h - 1 ? s_h - 1 : ClipYMax;
-    s_nbStatic = 0;        /* the lamps are the exteriors' */
+    s_nbStatic = 0; /* the room's own, from DynLight_IsoEnd */
+    s_isoStatic = 0;
     s_tintStaticValid = 0; /* and so is their tint */
     s_isoBuilding = 1;
     GrilleBrickDrawn = DynLight_IsoBrick;
 }
+
+static void DynLight_IsoStatics(void);
 
 void DynLight_IsoEnd(void) {
     const U8 *log = (const U8 *)Log;
@@ -1292,6 +1538,7 @@ void DynLight_IsoEnd(void) {
         }
     ambient = count ? sum / count : 255;
     s_isoScale = DynLight_IsoStrength(ambient);
+    DynLight_IsoStatics();
 }
 
 /* The interior was drawn with this camera, at this size: a camera moved
@@ -1334,7 +1581,7 @@ static S32 DynLight_IsoAtLight(const T_DYN_LIGHT *l, S32 level, float r2, float 
     float dot;
     if (d2 >= r2)
         return 0;
-    dot = DynLight_IsoDot(face, dx, dy, dz);
+    dot = DynLight_IsoDot(face & DYN_ISO_FACE, dx, dy, dz);
     return (DynLight_FalloffF(d2, inv2, level) * DynLight_IsoLambert(dot, sqrtf(d2))) >> 8;
 }
 
@@ -1462,6 +1709,324 @@ static void DynLight_IsoAddHalo(T_DYN_ACC *acc, const T_DYN_LIGHT *l, const T_DY
     DynLight_Union(u, &b);
 }
 
+/* The static lights indoors, found on each full redraw (DynLight_IsoEnd) and
+   baked into the background as the lamps are outdoors: the lamps painted into
+   the bricks, each a light off its glass, and the lava's field. */
+#define DYN_ISO_LAMP_CANDS 256
+#define DYN_ISO_LAMP_MERGE 400.0f /* two lamps nearer than this are one */
+#define DYN_ISO_LAMP_OFF 96.0f    /* the light, off the glass along its face's normal */
+#define DYN_ISO_LAMP_AREA 150.0f  /* a spot of this many pixels lights DYN_ISO_LAMP_LEVEL ... */
+#define DYN_ISO_LAMP_LEVEL 176
+#define DYN_ISO_LAMP_REACH 2560.0f /* ... as far as this; a smaller one, by its side */
+#define DYN_LAVA_CELLS 4096        /* open lava cells a room holds at most; 1837 in the game */
+#define DYN_LAVA_BODY 32           /* the lava as the bodies see it: lights over its stretches */
+#define DYN_LAVA_BIN 2             /* a stretch, 1 << this cells a side */
+static U32 s_lava[DYN_LAVA_CELLS]; /* x | y << 6 | z << 11 */
+static S32 s_nbLava = 0;
+static U16 *s_lavaField = NULL;              /* DYN_LAVA_CORNERS x 3, for s_lava */
+static T_DYN_BOX s_lavaBox = {0, 0, -1, -1}; /* where its light shows */
+static T_DYN_LIGHT s_lavaBody[DYN_LAVA_BODY];
+static S32 s_nbLavaBody = 0;
+
+typedef struct {
+    float x, y, z;
+    S32 area;
+    U8 colour;
+} T_DYN_ISO_LAMP;
+
+/* Where a lamp brick of cell (cx, cy, cz) lights from: the point its spot's
+   middle shows (the brick's surface, DynLight_IsoSurfT3), off it along the
+   face's normal, so a lamp set in a floor or a wall lights it. */
+static void DynLight_IsoLampPoint(S32 brick, S32 col, const T_DYN_LAMP_BLOB *b, S32 cx, S32 cy, S32 cz,
+                                  T_DYN_ISO_LAMP *out) {
+    const U8 *mask = BufferMaskBrick + ((const U32 *)BufferMaskBrick)[brick];
+    const S32 k = DynLight_IsoBrickSurf(brick, col, mask);
+    S32 u = (S32)(b->cu + 0.5f), v = (S32)(b->cv + 0.5f), face;
+    double t, d, bb;
+    u = u < 0 ? 0 : (u > DYN_ISO_W - 1 ? DYN_ISO_W - 1 : u);
+    v = v < 0 ? 0 : (v > DYN_ISO_H - 1 ? DYN_ISO_H - 1 : v);
+    t = DynLight_IsoSurfT3(u, v, &s_isoSurf[k], &face);
+    d = 64.0 * u - 1504.0; /* 3(x - z), cell-local */
+    bb = 256.0 * (v - 14); /* 6(x + z) - 15y */
+    out->x = (float)(512 * cx) + (float)((t / 3.0 + d / 3.0) / 2.0) + DYN_ISO_LAMP_OFF * DynLight_IsoDot(face, 1, 0, 0);
+    out->y = (float)(256 * cy) + (float)((2.0 * t - bb) / 15.0) + DYN_ISO_LAMP_OFF * DynLight_IsoDot(face, 0, 1, 0);
+    out->z = (float)(512 * cz) + (float)((t / 3.0 - d / 3.0) / 2.0) + DYN_ISO_LAMP_OFF * DynLight_IsoDot(face, 0, 0, 1);
+    out->area = b->area;
+    out->colour = b->colour;
+}
+
+/* The lava's field, for s_lava (DynLight_LavaAdd), built when its cells
+   change: once per room, or when a scene changes its grid. */
+static void DynLight_IsoLavaField(void) {
+    float *acc;
+    S32 k;
+    if (!s_nbLava)
+        return;
+    if (s_lavaField == NULL)
+        s_lavaField = (U16 *)malloc(sizeof(U16) * DYN_LAVA_CORNERS * 3);
+    acc = (float *)calloc((size_t)DYN_LAVA_CORNERS * 3, sizeof(float));
+    if (s_lavaField == NULL || acc == NULL) {
+        free(acc);
+        s_nbLava = 0;
+        return;
+    }
+    for (k = 0; k < s_nbLava; k++) {
+        const S32 x = s_lava[k] & 63, y = (s_lava[k] >> 6) & 31, z = s_lava[k] >> 11;
+        DynLight_LavaAdd(acc, (float)(512 * x + 256), (float)(256 * (y + 1) + DYN_LAVA_LIFT), (float)(512 * z + 256));
+    }
+    for (k = 0; k < DYN_LAVA_CORNERS * 3; k++) {
+        const float f = acc[k] * ((float)DYN_LAVA_ONE / DYN_LAVA_LAKE);
+        s_lavaField[k] = (U16)(f >= 65535.0f ? 65535 : (S32)(f + 0.5f));
+    }
+    free(acc);
+}
+
+/* The lava as the bodies see it: a light over each of its DYN_LAVA_BODY
+   largest stretches in view, as strong as its cells would give the top of a
+   cell amid them, spread as wide as they are. */
+static void DynLight_IsoLavaBodies(void) {
+    enum { BX = SIZE_CUBE_X >> DYN_LAVA_BIN,
+           BZ = SIZE_CUBE_Z >> DYN_LAVA_BIN,
+           BINS = BX * SIZE_CUBE_Y * BZ };
+    static S32 cnt[BINS];
+    static float sum[BINS][4];
+    T_DYN_LIGHT cand[DYN_LAVA_BODY];
+    S32 n[DYN_LAVA_BODY];
+    S32 k, nb = 0;
+    s_nbLavaBody = 0;
+    memset(cnt, 0, sizeof(cnt));
+    memset(sum, 0, sizeof(sum));
+    for (k = 0; k < s_nbLava; k++) {
+        const S32 x = s_lava[k] & 63, y = (s_lava[k] >> 6) & 31, z = s_lava[k] >> 11;
+        const S32 bi = ((z >> DYN_LAVA_BIN) * SIZE_CUBE_Y + y) * BX + (x >> DYN_LAVA_BIN);
+        const float lx = (float)(512 * x + 256), lz = (float)(512 * z + 256);
+        cnt[bi]++;
+        sum[bi][0] += lx;
+        sum[bi][1] += lz;
+        sum[bi][2] += lx * lx + lz * lz;
+        sum[bi][3] = (float)(256 * (y + 1) + DYN_LAVA_LIFT);
+    }
+    for (k = 0; k < BINS; k++) {
+        T_DYN_LIGHT l;
+        T_DYN_BOX b;
+        float spread;
+        S32 j, level;
+        if (!cnt[k])
+            continue;
+        memset(&l, 0, sizeof(l));
+        l.x = sum[k][0] / (float)cnt[k];
+        l.z = sum[k][1] / (float)cnt[k];
+        l.y = sum[k][3];
+        spread = sum[k][2] / (float)cnt[k] - l.x * l.x - l.z * l.z + 512.0f * 512.0f / 6.0f;
+        l.reach = sqrtf(DYN_LAVA_REACH * DYN_LAVA_REACH + 4.0f * (spread > 0.0f ? spread : 0.0f));
+        level = (S32)((float)DYN_LAVA_LEVEL * (float)cnt[k] / DYN_LAVA_LAKE);
+        l.level = ((level > DYN_LAVA_LEVEL ? DYN_LAVA_LEVEL : level) * s_isoScale) >> 8;
+        if (!DynLight_IsoLightBox(&l, l.reach, &s_isoClip, &b))
+            continue;
+        j = DynLight_KeepLargest(n, &nb, DYN_LAVA_BODY, cnt[k]);
+        if (j < 0)
+            continue;
+        memmove(&cand[j + 1], &cand[j], sizeof(T_DYN_LIGHT) * (size_t)(nb - 1 - j));
+        cand[j] = l;
+    }
+    memcpy(s_lavaBody, cand, sizeof(T_DYN_LIGHT) * (size_t)nb);
+    s_nbLavaBody = nb;
+}
+
+/* The lava's own colour, from its pixels on screen: the mean of its bright
+   half, nearest in the palette. It holds while no lava shows. */
+static void DynLight_IsoLavaColour(void) {
+    const U8 *log = (const U8 *)Log;
+    S32 hist[256], x, y, n = 0, half, acc = 0, sr = 0, sg = 0, sb = 0, cnt = 0;
+    if (PtrPalCurrent == NULL)
+        return;
+    memset(hist, 0, sizeof(hist));
+    for (y = s_isoClip.y0; y <= s_isoClip.y1; y += 2)
+        for (x = s_isoClip.x0; x <= s_isoClip.x1; x += 2) {
+            const U32 i = TabOffLine[y] + (U32)x;
+            if (s_isoS[i] != DYN_ISO_NONE && (s_isoF[i] & DYN_ISO_LAVA) && log[i]) {
+                hist[DynLight_Luma(PtrPalCurrent + 3 * log[i])]++;
+                n++;
+            }
+        }
+    if (!n)
+        return;
+    for (half = 0; half < 256 && acc + hist[half] <= n / 2; half++)
+        acc += hist[half];
+    for (y = s_isoClip.y0; y <= s_isoClip.y1; y += 2)
+        for (x = s_isoClip.x0; x <= s_isoClip.x1; x += 2) {
+            const U32 i = TabOffLine[y] + (U32)x;
+            const U8 *rgb = PtrPalCurrent + 3 * log[i];
+            if (s_isoS[i] == DYN_ISO_NONE || !(s_isoF[i] & DYN_ISO_LAVA) || !log[i] || DynLight_Luma(rgb) < half)
+                continue;
+            sr += rgb[0];
+            sg += rgb[1];
+            sb += rgb[2];
+            cnt++;
+        }
+    if (cnt)
+        s_lavaColour = (U8)DynLight_Nearest(PtrPalCurrent, (float)sr / cnt, (float)sg / cnt, (float)sb / cnt);
+}
+
+/* The room's grid, cell by cell: its open lava, and its lamp bricks, each
+   placed and merged with the lamps near it; then the lamps in view, the
+   largest first, as the frame's static lights. */
+static void DynLight_IsoScan(void) {
+    static U32 lava[DYN_LAVA_CELLS];
+    static T_DYN_ISO_LAMP cand[DYN_ISO_LAMP_CANDS];
+    S32 keptArea[DYN_STATIC_LIGHTS];
+    const S32 bank = DynLight_IsoBankSize();
+    S32 x, y, z, k, nLava = 0, nCand = 0;
+    for (z = 0; z < SIZE_CUBE_Z; z++)
+        for (x = 0; x < SIZE_CUBE_X; x++) {
+            const U8 *column = BufCube + x * SIZE_CUBE_Y * 2 + z * SIZE_CUBE_X * SIZE_CUBE_Y * 2;
+            for (y = 0; y < SIZE_CUBE_Y; y++) {
+                const U8 *cell = column + y * 2, *blk;
+                S32 nb, lamp;
+                if (!cell[0])
+                    continue;
+                blk = GetAdrBlock(cell[0] - 1);
+                if (cell[1] >= blk[0] * blk[1] * blk[2]) /* AffBrickBlock's BrickInsideBlock */
+                    continue;
+                blk += DYN_ISO_HEADER_BLOCK;
+                nb = ReadLE_U16(blk + 4 * cell[1] + 2);
+                if (nb < 1 || nb > bank || nb == ForbidenBrick) /* nothing drawn there (AffBrickBlock) */
+                    continue;
+                if (DynLight_LavaCode(blk[1] >> 4) && (y == SIZE_CUBE_Y - 1 || !cell[2]) && nLava < DYN_LAVA_CELLS)
+                    lava[nLava++] = (U32)(x | y << 6 | z << 11);
+                lamp = DynLight_IsoLampOf(nb - 1);
+                if (lamp >= 0 && nCand < DYN_ISO_LAMP_CANDS) {
+                    T_DYN_ISO_LAMP l;
+                    DynLight_IsoLampPoint(nb - 1, blk[4 * cell[1]], &s_isoLampBlob[lamp], x, y, z, &l);
+                    for (k = 0; k < nCand; k++) {
+                        const float dx = cand[k].x - l.x, dy = cand[k].y - l.y, dz = cand[k].z - l.z;
+                        if (dx * dx + dy * dy + dz * dz < DYN_ISO_LAMP_MERGE * DYN_ISO_LAMP_MERGE)
+                            break;
+                    }
+                    if (k == nCand)
+                        cand[nCand++] = l;
+                    else if (l.area > cand[k].area)
+                        cand[k] = l;
+                }
+            }
+        }
+
+    if (!s_lavaKnown || nLava != s_nbLava || memcmp(lava, s_lava, sizeof(U32) * (size_t)nLava)) {
+        memcpy(s_lava, lava, sizeof(U32) * (size_t)nLava);
+        s_nbLava = nLava;
+        s_lavaKnown = 1;
+        DynLight_IsoLavaField();
+    }
+    s_lavaBox.x0 = s_lavaBox.y0 = 0;
+    s_lavaBox.x1 = s_lavaBox.y1 = -1;
+    for (k = 0; k < s_nbLava; k++) {
+        T_DYN_LIGHT l;
+        T_DYN_BOX b;
+        l.x = (float)(512 * (s_lava[k] & 63) + 256);
+        l.y = (float)(256 * (((s_lava[k] >> 6) & 31) + 1) + DYN_LAVA_LIFT);
+        l.z = (float)(512 * (s_lava[k] >> 11) + 256);
+        if (DynLight_IsoLightBox(&l, DYN_LAVA_REACH, &s_isoClip, &b))
+            DynLight_Union(&s_lavaBox, &b);
+    }
+    if (s_nbLava) {
+        DynLight_IsoLavaBodies();
+        DynLight_IsoLavaColour();
+        if (!s_lavaColour)
+            s_lavaColour = (U8)DynLight_Nearest(PtrPalCurrent, 164.0f, 34.0f, 28.0f); /* the lava's usual */
+    }
+
+    /* The lamps in view, the largest first. */
+    s_nbStatic = 0;
+    for (k = 0; k < nCand; k++) {
+        const float side = sqrtf((float)cand[k].area / DYN_ISO_LAMP_AREA);
+        const T_DYN_ISO_LAMP c = cand[k];
+        T_DYN_LIGHT *l, probe;
+        T_DYN_BOX b;
+        S32 j, level;
+        float reach = DYN_ISO_LAMP_REACH * side;
+        reach = reach < 1536.0f ? 1536.0f : (reach > 4096.0f ? 4096.0f : reach);
+        probe.x = c.x;
+        probe.y = c.y;
+        probe.z = c.z;
+        if (!DynLight_IsoLightBox(&probe, reach, &s_isoClip, &b))
+            continue;
+        j = DynLight_KeepLargest(keptArea, &s_nbStatic, DYN_STATIC_LIGHTS, c.area);
+        if (j < 0)
+            continue;
+        memmove(&s_static[j + 1], &s_static[j], sizeof(T_DYN_LIGHT) * (size_t)(s_nbStatic - 1 - j));
+        l = &s_static[j];
+        level = (S32)((float)DYN_ISO_LAMP_LEVEL * side);
+        level = level < 64 ? 64 : (level > 224 ? 224 : level);
+        l->x = c.x;
+        l->y = c.y;
+        l->z = c.z;
+        l->reach = reach;
+        l->emitR = sqrtf((float)c.area / 3.14159265f) / DYN_ISO_RX;
+        l->level = (level * s_isoScale) >> 8;
+        l->halo = (DYN_LAMP_HALO * s_isoScale) >> 8;
+        l->glow = (DYN_LAMP_GLOW * s_isoScale) >> 8;
+        l->tint = (DYN_LAMP_TINT * s_isoScale) >> 8;
+        l->colour = c.colour;
+    }
+}
+
+/* The lava's light into `acc`: each brick's pixel that is not lava itself
+   reads the field by the face it shows (a slope reads the top's). */
+static void DynLight_IsoAddLava(T_DYN_ACC *acc, T_DYN_BOX *u) {
+    const U8 *log = (const U8 *)Log;
+    const S32 scale = (DYN_LAVA_LEVEL * s_isoScale) >> 8;
+    const T_DYN_BOX *b = &s_lavaBox;
+    S32 x, y;
+    if (s_lavaField == NULL || DynLight_BoxEmpty(b))
+        return;
+    for (y = b->y0; y <= b->y1; y++) {
+        const U32 row = TabOffLine[y];
+        const float rowY = DynLight_IsoRowY(y);
+        for (x = b->x0; x <= b->x1; x++) {
+            const U32 i = row + (U32)x;
+            const S32 face = s_isoF[i] & DYN_ISO_FACE;
+            float X, Y, Z;
+            S32 v;
+            if ((s_isoF[i] & DYN_ISO_LAVA) || !log[i] || !DynLight_IsoAt(i, x, rowY, &X, &Y, &Z))
+                continue;
+            v = (DynLight_LavaAt(s_lavaField, X, Y, Z, face <= DYN_ISO_PZ ? face : DYN_ISO_TOP) * scale) >> 12;
+            if (v <= 0)
+                continue;
+            v += acc->pix[i];
+            acc->pix[i] = (U8)(v > 255 ? 255 : v);
+        }
+    }
+    DynLight_Union(u, b);
+}
+
+/* DynLight_BakeBackground indoors, at the end of the room's full redraw:
+   Log holds its bricks alone, and the copy to the background follows. */
+static void DynLight_IsoStatics(void) {
+    T_DYN_BOX u = {0, 0, -1, -1};
+    S32 k;
+    s_isoStatic = 0;
+    s_nbStatic = 0;
+    s_nbLavaBody = 0;
+    if (!DynLight_Surf() || BufCube == NULL || BufferBrick == NULL || BufferMaskBrick == NULL)
+        return;
+    DynLight_IsoColumns();
+    DynLight_IsoScan();
+    if (!s_nbStatic && !s_nbLava)
+        return;
+    DynLight_Clear(&s_staticAcc);
+    for (k = 0; k < s_nbStatic; k++) {
+        DynLight_IsoAddPool(&s_staticAcc, &s_static[k], &s_isoClip, 0, &u);
+        if (DynLight == 1) /* level 2 glows at present instead */
+            DynLight_IsoAddHalo(&s_staticAcc, &s_static[k], &s_isoClip, 0, &u);
+    }
+    if (s_nbLava)
+        DynLight_IsoAddLava(&s_staticAcc, &u);
+    s_staticAcc.box = u;
+    if (!DynLight_BoxEmpty(&u))
+        DynLight_Apply((U8 *)Log, &s_staticAcc, 0);
+    s_isoStatic = 1;
+}
+
 /*══════════════════════════════════════════════════════════════════════════*
     The colour stage (level 2)
  *══════════════════════════════════════════════════════════════════════════*/
@@ -1473,7 +2038,8 @@ static void DynLight_IsoAddHalo(T_DYN_ACC *acc, const T_DYN_LIGHT *l, const T_DY
    until the next full redraw; a frame with moving lights adds theirs to a
    copy. The glows are kept as where and how wide they show. */
 #define DYN_GLOWS (DYN_STATIC_LIGHTS + DYN_MOVING_LIGHTS)
-#define DYN_TINT_SLOTS 4 /* light colours a frame tints with; a fifth tints nothing */
+#define DYN_TINT_SLOTS 4       /* light colours a frame tints with; a fifth tints nothing */
+#define DYN_ISO_STATIC_SLOTS 2 /* of them, the room's static lights' at most */
 typedef struct {
     S32 sx, sy, rs, glow;
     S32 front; /* s_glowZ's value at the emitter's near side: what is nearer is not glowed over */
@@ -1601,12 +2167,13 @@ static void DynLight_CopyTint(T_DYN_TINT *dst, const T_DYN_TINT *src) {
 }
 
 /* The slot of a light colour, taken on first use; -1 past the last. */
+static S32 s_slotCap = DYN_TINT_SLOTS; /* the slots a light may take while it is set */
 static S32 DynLight_Slot(T_DYN_TINT *t, U8 colour) {
     S32 k;
     for (k = 0; k < t->nbSlots; k++)
         if (t->slotColour[k] == colour)
             return k;
-    if (t->nbSlots >= DYN_TINT_SLOTS)
+    if (t->nbSlots >= s_slotCap)
         return -1;
     t->slotColour[t->nbSlots] = colour;
     return t->nbSlots++;
@@ -1649,6 +2216,54 @@ static void DynLight_IsoAddTint(T_DYN_TINT *tt, const T_DYN_LIGHT *l, const T_DY
             if (!DynLight_IsoAt(i, px, rowY, &X, &Y, &Z))
                 continue;
             t = DynLight_IsoAtLight(l, l->tint, r2, inv2, s_isoF[i], X, Y, Z);
+            if (t <= 0)
+                continue;
+            if (t > 255)
+                t = 255;
+            ci = (size_t)cy * s_cw + cx;
+            tt->t[ci] = (U16)(tt->t[ci] + t > 255 ? 255 : tt->t[ci] + t);
+            if (t > tt->best[ci]) {
+                tt->best[ci] = (U8)t;
+                tt->slot[ci] = (U8)slot;
+            }
+        }
+    }
+    DynLight_Union(&tt->box, &c);
+}
+
+/* The lava's tint, in its colour: each cell's middle pixel's brick, as much
+   as the field gives it (full at a lake's middle); the lava itself keeps its
+   own. */
+static void DynLight_IsoAddLavaTint(T_DYN_TINT *tt, const T_DYN_BOX *win) {
+    T_DYN_BOX b = s_lavaBox, c;
+    S32 cx, cy, slot;
+    DynLight_Clip(&b, win);
+    if (s_lavaField == NULL || DynLight_BoxEmpty(&b))
+        return;
+    slot = DynLight_Slot(tt, s_lavaColour);
+    if (slot < 0)
+        return;
+    c.x0 = b.x0 >> 2;
+    c.y0 = b.y0 >> 2;
+    c.x1 = (b.x1 >> 2) + 1;
+    c.y1 = (b.y1 >> 2) + 1;
+    if (c.x1 > s_cw - 1)
+        c.x1 = s_cw - 1;
+    if (c.y1 > s_ch - 1)
+        c.y1 = s_ch - 1;
+    for (cy = c.y0; cy <= c.y1; cy++) {
+        const S32 py = cy * 4 + 2 > s_h - 1 ? s_h - 1 : cy * 4 + 2;
+        const float rowY = DynLight_IsoRowY(py);
+        for (cx = c.x0; cx <= c.x1; cx++) {
+            const S32 px = cx * 4 + 2 > s_w - 1 ? s_w - 1 : cx * 4 + 2;
+            const U32 i = TabOffLine[py] + (U32)px;
+            const S32 face = s_isoF[i] & DYN_ISO_FACE;
+            float X, Y, Z;
+            size_t ci;
+            S32 t;
+            if ((s_isoF[i] & DYN_ISO_LAVA) || !DynLight_IsoAt(i, px, rowY, &X, &Y, &Z))
+                continue;
+            t = (DynLight_LavaAt(s_lavaField, X, Y, Z, face <= DYN_ISO_PZ ? face : DYN_ISO_TOP) * s_isoScale) >> 12;
             if (t <= 0)
                 continue;
             if (t > 255)
@@ -1827,10 +2442,13 @@ static void DynLight_AddGlow(const T_DYN_LIGHT *l, S32 lamp, const T_DYN_BOX *wi
     }
 }
 
-/* Whether the static lights (the lamps outdoors) light this frame: outdoors
-   at night once baked; indoors there are none. */
+/* Whether the static lights light this frame: outdoors the lamps, at night
+   once baked; indoors the room's lamps and lava, baked into the background
+   this camera shows. */
 static S32 DynLight_StaticOn(void) {
-    return !s_iso && DynLight_Night() && s_staticValid;
+    if (s_iso)
+        return s_isoStatic && DynLight_IsoReady();
+    return DynLight_Night() && s_staticValid;
 }
 
 /* Level 2's glows, from the frame before the moving lights change it. */
@@ -1867,9 +2485,18 @@ static void DynLight_ColourFrame(const T_DYN_BOX *win) {
         full.x1 = s_w - 1;
         full.y1 = s_h - 1;
         DynLight_ClearTint(&s_tintStatic);
-        if (night)
+        if (night) {
+            /* Indoors the lava and the lamps take two of the colours at most,
+               the lava's first, and leave the rest to the moving lights. */
+            if (s_iso) {
+                s_slotCap = DYN_ISO_STATIC_SLOTS;
+                if (s_nbLava)
+                    DynLight_IsoAddLavaTint(&s_tintStatic, &full);
+            }
             for (k = 0; k < s_nbStatic; k++)
                 DynLight_AddTint(&s_tintStatic, &s_static[k], &full);
+            s_slotCap = DYN_TINT_SLOTS;
+        }
         s_tintStaticValid = 1;
     }
     if (!s_nbMoving)
@@ -2023,7 +2650,7 @@ typedef struct {
     float r2;
     S32 level;
 } T_DYN_BODYLIGHT;
-#define DYN_BODY_LIGHTS (DYN_STATIC_LIGHTS + DYN_MOVING_LIGHTS)
+#define DYN_BODY_LIGHTS (DYN_STATIC_LIGHTS + DYN_LAVA_BODY + DYN_MOVING_LIGHTS)
 static T_DYN_BODYLIGHT s_body[DYN_BODY_LIGHTS];
 static S32 s_nbBody = 0; /* the static ones first, then the moving ones */
 static S32 s_nbBodyStatic = 0;
@@ -2074,9 +2701,12 @@ void DynLight_BeginBodies(void) {
     if (!DynLight)
         return;
     s_iso = CubeMode != CUBE_EXTERIEUR;
-    if (DynLight_StaticOn())
+    if (DynLight_StaticOn()) {
         for (k = 0; k < s_nbStatic; k++)
             DynLight_BodyFrom(&s_static[k]);
+        for (k = 0; s_iso && k < s_nbLavaBody; k++)
+            DynLight_BodyFrom(&s_lavaBody[k]);
+    }
     s_nbBodyStatic = s_nbBody;
     DynLight_GatherMoving(); /* the moving pass gathers them again, the same, after the bodies */
     for (k = 0; k < s_nbMoving; k++)

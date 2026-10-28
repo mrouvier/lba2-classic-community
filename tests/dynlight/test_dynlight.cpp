@@ -18,6 +18,7 @@
 #include "test_harness.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 static U8 g_map[DYN_LIGHT_GRID * DYN_LIGHT_GRID];
@@ -433,6 +434,138 @@ static void test_a_brick_shows_the_surface_it_draws(void) {
             }
 }
 
+/* The largest of a stream are kept, largest first: a later, smaller one does
+   not push out a larger one once the list is full, and what is kept beside
+   each count moves with it. */
+static void test_the_largest_are_kept(void) {
+    /* eight 16s first (at 0, 1, 3, 6, 7, 9, 11, 12), then smaller ones, more
+       16s, and a small one last */
+    static const S32 counts[24] = {16, 16, 3, 16, 9, 1, 16, 16, 2, 16, 12, 16, 16, 5, 16, 16, 1, 7, 16, 4, 16, 15, 14, 2};
+    static const S32 first[8] = {0, 1, 3, 6, 7, 9, 11, 12};
+    S32 n[8], tag[8], nb = 0, k, j;
+    for (k = 0; k < 24; k++) {
+        j = DynLight_KeepLargest(n, &nb, 8, counts[k]);
+        if (j < 0)
+            continue;
+        memmove(&tag[j + 1], &tag[j], sizeof(S32) * (size_t)(nb - 1 - j));
+        tag[j] = k;
+    }
+    ASSERT_EQ_INT(8, nb);
+    for (k = 0; k < 8; k++) {
+        ASSERT_EQ_INT(16, n[k]);
+        ASSERT_EQ_INT(first[k], tag[k]); /* ties in the order they came */
+    }
+    /* a short stream keeps everything, largest first */
+    nb = 0;
+    for (k = 2; k < 6; k++)
+        DynLight_KeepLargest(n, &nb, 8, counts[k]);
+    ASSERT_EQ_INT(4, nb);
+    ASSERT_EQ_INT(16, n[0]);
+    ASSERT_EQ_INT(9, n[1]);
+    ASSERT_EQ_INT(3, n[2]);
+    ASSERT_EQ_INT(1, n[3]);
+}
+
+/* A sprite's runs (skip, copy, repeat) land in its box at its corner. */
+static void test_a_sprite_is_laid_into_its_box(void) {
+    static const U8 spr[] = {5, 2, 10, 20,      /* 5 x 2 at (10, 20) */
+                             3, 0x00,           /* row 0: skip 1, */
+                             0x40, 7,           /* copy 1 (7), */
+                             0x81, 9,           /* 9 twice */
+                             1, 0x42, 1, 2, 3}; /* row 1: copy 3 (1, 2, 3) */
+    static U8 idx[DYN_ISO_W * DYN_ISO_H], opq[DYN_ISO_W * DYN_ISO_H];
+    const S32 n = DynLight_SpriteCanvas(spr, idx, opq);
+    ASSERT_EQ_INT(6, n);
+    ASSERT_EQ_INT(0, opq[20 * DYN_ISO_W + 10]);
+    ASSERT_EQ_INT(7, idx[20 * DYN_ISO_W + 11]);
+    ASSERT_EQ_INT(9, idx[20 * DYN_ISO_W + 12]);
+    ASSERT_EQ_INT(9, idx[20 * DYN_ISO_W + 13]);
+    ASSERT_EQ_INT(3, idx[21 * DYN_ISO_W + 12]);
+    ASSERT_EQ_INT(1, opq[21 * DYN_ISO_W + 10]);
+}
+
+/* A lamp: a round white spot, hotter at its core, ringed with its glass's
+   colour, inside a dim brick. A white wall's flat sheen is none. */
+static void test_a_painted_lamp_is_found(void) {
+    static U8 pal[768], idx[DYN_ISO_W * DYN_ISO_H], opq[DYN_ISO_W * DYN_ISO_H];
+    T_DYN_LAMP_BLOB b;
+    S32 u, v;
+    memset(pal, 0, sizeof(pal));
+    pal[3 * 1] = pal[3 * 1 + 1] = pal[3 * 1 + 2] = 90;  /* 1: the brick, grey */
+    pal[3 * 2] = pal[3 * 2 + 1] = pal[3 * 2 + 2] = 255; /* 2: the core, white */
+    pal[3 * 3] = pal[3 * 3 + 1] = pal[3 * 3 + 2] = 228; /* 3: the spot's rim */
+    pal[3 * 4] = 40;                                    /* 4: the glass, cyan */
+    pal[3 * 4 + 1] = pal[3 * 4 + 2] = 210;
+    for (v = 0; v < DYN_ISO_H; v++)
+        for (u = 0; u < DYN_ISO_W; u++) {
+            const S32 du = u - 24, dv = v - 18, d2 = du * du + dv * dv;
+            opq[v * DYN_ISO_W + u] = 1;
+            idx[v * DYN_ISO_W + u] = (U8)(d2 <= 9 ? 2 : (d2 <= 25 ? 3 : (d2 <= 49 ? 4 : 1)));
+        }
+    ASSERT_EQ_INT(1, DynLight_LampBlob(idx, opq, DYN_ISO_W * DYN_ISO_H, pal, &b));
+    ASSERT_NEAR_F(24.0f, b.cu, 0.01f);
+    ASSERT_NEAR_F(18.0f, b.cv, 0.01f);
+    ASSERT_EQ_INT(81, b.area); /* the 9 x 9 disc of d^2 <= 25 */
+    ASSERT_EQ_INT(4, b.colour);
+
+    /* The same spot all core: no shading, a sheen. */
+    for (u = 0; u < DYN_ISO_W * DYN_ISO_H; u++)
+        if (idx[u] == 3)
+            idx[u] = 2;
+    ASSERT_EQ_INT(0, DynLight_LampBlob(idx, opq, DYN_ISO_W * DYN_ISO_H, pal, &b));
+    /* A long white stripe: not round. */
+    for (u = 0; u < DYN_ISO_W * DYN_ISO_H; u++)
+        idx[u] = 1;
+    for (v = 16; v <= 20; v++)
+        for (u = 4; u <= 44; u++)
+            idx[v * DYN_ISO_W + u] = (U8)(v == 18 ? 2 : 3);
+    ASSERT_EQ_INT(0, DynLight_LampBlob(idx, opq, DYN_ISO_W * DYN_ISO_H, pal, &b));
+}
+
+/* The lava's field: the top of a cell amid a lake takes DYN_LAVA_ONE, none
+   past its reach, a face turned away from the lake less than the floor
+   beside it, and a point past the room's last corner reads inside the
+   field. */
+static void test_the_lava_lights_by_its_field(void) {
+    float *acc = (float *)calloc((size_t)DYN_LAVA_CORNERS * 3, sizeof(float));
+    U16 *field = (U16 *)malloc(sizeof(U16) * DYN_LAVA_CORNERS * 3);
+    S32 x, z, k;
+    ASSERT_TRUE(acc != NULL && field != NULL);
+    if (acc == NULL || field == NULL)
+        return;
+    for (z = 0; z < 64; z++)
+        for (x = 0; x < 64; x++)
+            DynLight_LavaAdd(acc, (float)(512 * x + 256), (float)(256 + DYN_LAVA_LIFT), (float)(512 * z + 256));
+    /* the corner of a cell's top amid it (DYN_LAVA_LAKE is taken at the
+       top's middle, half a cell off) */
+    ASSERT_NEAR_F(DYN_LAVA_LAKE, acc[((32 * DYN_LAVA_GY + 1) * DYN_LAVA_GX + 32) * 3], 0.03f);
+    for (k = 0; k < DYN_LAVA_CORNERS * 3; k++) {
+        const float f = acc[k] * ((float)DYN_LAVA_ONE / DYN_LAVA_LAKE);
+        field[k] = (U16)(f >= 65535.0f ? 65535 : (S32)(f + 0.5f));
+    }
+    ASSERT_NEAR_F((float)DYN_LAVA_ONE, (float)DynLight_LavaAt(field, 16384.0f, 256.0f, 16384.0f, 0), 8.0f);
+    ASSERT_TRUE(DynLight_LavaAt(field, 16384.0f, 2560.0f, 16384.0f, 0) == 0); /* beyond its reach */
+    /* past the last corners, and below the first */
+    ASSERT_TRUE(DynLight_LavaAt(field, 40000.0f, 9000.0f, -100.0f, 2) >= 0);
+    ASSERT_TRUE(DynLight_LavaAt(field, -100.0f, -100.0f, 40000.0f, 1) >= 0);
+
+    /* A lake that ends at z = 8192. */
+    memset(acc, 0, sizeof(float) * DYN_LAVA_CORNERS * 3);
+    for (z = 0; z < 16; z++)
+        for (x = 0; x < 64; x++)
+            DynLight_LavaAdd(acc, (float)(512 * x + 256), (float)(256 + DYN_LAVA_LIFT), (float)(512 * z + 256));
+    for (k = 0; k < DYN_LAVA_CORNERS * 3; k++) {
+        const float f = acc[k] * ((float)DYN_LAVA_ONE / DYN_LAVA_LAKE);
+        field[k] = (U16)(f >= 65535.0f ? 65535 : (S32)(f + 0.5f));
+    }
+    /* Just past it, a face toward +z, turned away from it, takes less than
+       the floor there. */
+    ASSERT_TRUE(DynLight_LavaAt(field, 16384.0f, 300.0f, 8192.0f + 256.0f, 2) <
+                DynLight_LavaAt(field, 16384.0f, 300.0f, 8192.0f + 256.0f, 0));
+    free(acc);
+    free(field);
+}
+
 /* Every pixel of a cell's silhouette, kept and read back, lands on the face
    it shows, inside the cell, and projects back to its pixel: for cells and
    cameras all over a room, at three sizes. */
@@ -541,6 +674,10 @@ int main(void) {
     RUN_TEST(test_the_tint_and_the_glow);
     RUN_TEST(test_a_brick_shows_three_faces);
     RUN_TEST(test_a_brick_shows_the_surface_it_draws);
+    RUN_TEST(test_the_largest_are_kept);
+    RUN_TEST(test_a_sprite_is_laid_into_its_box);
+    RUN_TEST(test_a_painted_lamp_is_found);
+    RUN_TEST(test_the_lava_lights_by_its_field);
     RUN_TEST(test_a_background_pixel_reads_back_its_point);
     RUN_TEST(test_the_view_and_the_faces_take_the_light);
     RUN_TEST(test_a_body_shade_takes_the_light_it_faces);

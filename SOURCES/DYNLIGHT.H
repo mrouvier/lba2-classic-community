@@ -858,6 +858,330 @@ static inline U16 DynLight_BodyShade(U16 orig, const float *v, float nx, float n
     return (U16)(val > (S32)orig ? val : (S32)orig);
 }
 
+/* Keeping the largest of a stream, `max` at most: `n` holds the `*nb` kept,
+   largest first, ties in the order they came. Returns the place `count`
+   takes, the kept from there moved one down (the last dropped when full), or
+   -1 when the list is full and it is no larger than its last. A caller that
+   keeps something beside each count moves it the same way, its [j, *nb - 1)
+   to [j + 1, *nb). */
+static inline S32 DynLight_KeepLargest(S32 *n, S32 *nb, S32 max, S32 count) {
+    S32 j;
+    if (*nb >= max && count <= n[max - 1])
+        return -1;
+    j = *nb < max ? (*nb)++ : max - 1;
+    for (; j > 0 && n[j - 1] < count; j--)
+        n[j] = n[j - 1];
+    n[j] = count;
+    return j;
+}
+
+/* The static lights indoors. A room's bricks are drawn in advance, with the
+   light the artists painted on them: the lava's glow, and the lamps, white
+   spots ringed with their glass's colour. */
+
+/* A brick's sprite (AffGraph's layout: dx, dy, a signed corner, then per row
+   a count of runs: 00nnnnnn skips n + 1, 01nnnnnn copies n + 1 bytes,
+   1xnnnnnn repeats the next byte n + 1 times) laid into its 48 x 38 box:
+   `idx` its colours, `opq` 1 where it draws. Returns how many pixels it
+   draws. */
+static inline S32 DynLight_SpriteCanvas(const U8 *spr, U8 *idx, U8 *opq) {
+    const S32 dy = spr[1], hx = (S8)spr[2], hy = (S8)spr[3];
+    const U8 *p = spr + 4;
+    S32 r, n = 0;
+    for (r = 0; r < DYN_ISO_W * DYN_ISO_H; r++)
+        idx[r] = opq[r] = 0;
+    for (r = 0; r < dy; r++) {
+        const S32 v = hy + r;
+        S32 runs = *p++, u = hx;
+        while (runs-- > 0) {
+            const S32 c = *p++, op = c >> 6, cnt = (c & 63) + 1;
+            S32 k;
+            if (op == 0) {
+                u += cnt;
+                continue;
+            }
+            for (k = 0; k < cnt; k++, u++)
+                if (u >= 0 && u < DYN_ISO_W && v >= 0 && v < DYN_ISO_H) {
+                    const S32 i = v * DYN_ISO_W + u;
+                    idx[i] = op == 1 ? p[k] : p[0];
+                    n += !opq[i];
+                    opq[i] = 1;
+                }
+            p += op == 1 ? cnt : 1;
+        }
+    }
+    return n;
+}
+
+/* A box's colours, hashed (FNV-1a): a brick the lamp test takes wrongly is
+   named by it, whatever its number in the room's bank. */
+static inline U32 DynLight_CanvasHash(const U8 *idx, const U8 *opq) {
+    U32 h = 2166136261u;
+    S32 i;
+    for (i = 0; i < DYN_ISO_W * DYN_ISO_H; i++) {
+        h ^= opq[i] ? idx[i] : 0u;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+/* A lamp painted into a brick: a spot of bright pixels (luma at least
+   DYN_LAMP_BRIGHT, 8-connected) that is small, round, solid, inside the
+   sprite rather than on its outline, brighter at its core than at its rim
+   (the shading that tells a lamp from a white wall's sheen), and white hot
+   at its peak. Its colour is its glass's, the ring of pixels within three of
+   it. Returns 0 when the sprite shows none, else its largest. */
+#define DYN_LAMP_BRIGHT 220
+#define DYN_LAMP_AREA_MIN 12
+#define DYN_LAMP_AREA_MAX 420
+#define DYN_LAMP_SHARE 0.45f   /* of the sprite's pixels, at most */
+#define DYN_LAMP_ASPECT 1.8f   /* its ellipse's axes, at most */
+#define DYN_LAMP_SOLID 0.65f   /* its area over its ellipse's, at least */
+#define DYN_LAMP_OUTLINE 0.35f /* of its rim on the sprite's outline, at most */
+#define DYN_LAMP_SHADE 12      /* its core's mean luma over its rim's, at least */
+#define DYN_LAMP_PEAK 245
+#define DYN_LAMP_RING 100 /* a ring pixel's luma, at least */
+typedef struct {
+    float cu, cv; /* its middle in the 48 x 38 box */
+    S32 area;
+    U8 colour; /* a palette index */
+} T_DYN_LAMP_BLOB;
+
+/* The palette entry nearest a colour, colour 0 (the clear colour) aside. */
+static inline S32 DynLight_Nearest(const U8 *pal, float r, float g, float b) {
+    S32 c, best = 1;
+    float bestD = 1e30f;
+    for (c = 1; c < 256; c++) {
+        const float dr = pal[3 * c] - r, dg = pal[3 * c + 1] - g, db = pal[3 * c + 2] - b;
+        const float d = dr * dr + dg * dg + db * db;
+        if (d < bestD) {
+            bestD = d;
+            best = c;
+        }
+    }
+    return best;
+}
+
+static inline S32 DynLight_LampBlob(const U8 *idx, const U8 *opq, S32 nOpaque, const U8 *pal,
+                                    T_DYN_LAMP_BLOB *lamp) {
+    enum { N = DYN_ISO_W * DYN_ISO_H };
+    U8 luma[N], bright[N];
+    S16 lab[N], stack[N], members[N];
+    S32 i, nb = 0, found = 0, bestLab = -1;
+    if (nOpaque <= 0)
+        return 0;
+    for (i = 0; i < N; i++) {
+        luma[i] = opq[i] ? (U8)DynLight_Luma(pal + 3 * idx[i]) : 0;
+        bright[i] = opq[i] && luma[i] >= DYN_LAMP_BRIGHT;
+        lab[i] = -1;
+    }
+    for (i = 0; i < N; i++) {
+        S32 sp = 0, a = 0, k, inner = 0, rim = 0, out = 0, sumIn = 0, sumRim = 0, peak = 0;
+        double su = 0, sv = 0, suu, svv, suv, tr, det, disc, l1, l2, cu, cv;
+        if (!bright[i] || lab[i] >= 0)
+            continue;
+        lab[i] = (S16)nb;
+        stack[sp++] = (S16)i;
+        while (sp) { /* the spot */
+            const S32 p = stack[--sp], pu = p % DYN_ISO_W, pv = p / DYN_ISO_W;
+            S32 du, dv;
+            members[a++] = (S16)p;
+            for (dv = -1; dv <= 1; dv++)
+                for (du = -1; du <= 1; du++) {
+                    const S32 qu = pu + du, qv = pv + dv, q = qv * DYN_ISO_W + qu;
+                    if (qu < 0 || qu >= DYN_ISO_W || qv < 0 || qv >= DYN_ISO_H || !bright[q] || lab[q] >= 0)
+                        continue;
+                    lab[q] = (S16)nb;
+                    stack[sp++] = (S16)q;
+                }
+        }
+        nb++;
+        if (a < DYN_LAMP_AREA_MIN || a > DYN_LAMP_AREA_MAX || (float)a > DYN_LAMP_SHARE * (float)nOpaque)
+            continue;
+        for (k = 0; k < a; k++) {
+            su += members[k] % DYN_ISO_W;
+            sv += members[k] / DYN_ISO_W;
+        }
+        cu = su / a;
+        cv = sv / a;
+        suu = svv = suv = 0;
+        for (k = 0; k < a; k++) {
+            const double du = members[k] % DYN_ISO_W - cu, dv = members[k] / DYN_ISO_W - cv;
+            suu += du * du;
+            svv += dv * dv;
+            suv += du * dv;
+        }
+        suu = suu / a + 1.0 / 12.0; /* a pixel's own spread */
+        svv = svv / a + 1.0 / 12.0;
+        suv /= a;
+        tr = suu + svv;
+        det = suu * svv - suv * suv;
+        disc = sqrt(tr * tr / 4.0 - det > 0.0 ? tr * tr / 4.0 - det : 0.0);
+        l1 = tr / 2.0 + disc;
+        l2 = tr / 2.0 - disc > 1e-6 ? tr / 2.0 - disc : 1e-6;
+        if (sqrt(l1 / l2) > DYN_LAMP_ASPECT ||
+            (double)a / (4.0 * 3.14159265358979 * sqrt(det > 1e-6 ? det : 1e-6)) < DYN_LAMP_SOLID)
+            continue;
+        for (k = 0; k < a; k++) {
+            const S32 p = members[k], pu = p % DYN_ISO_W, pv = p / DYN_ISO_W;
+            S32 du, dv, edge = 0, outside = 0;
+            for (dv = -1; dv <= 1; dv++)
+                for (du = -1; du <= 1; du++) {
+                    const S32 qu = pu + du, qv = pv + dv;
+                    const S32 in = qu >= 0 && qu < DYN_ISO_W && qv >= 0 && qv < DYN_ISO_H;
+                    if (!du && !dv)
+                        continue;
+                    if (!in || lab[qv * DYN_ISO_W + qu] != lab[p])
+                        edge = 1;
+                    if (!in || !opq[qv * DYN_ISO_W + qu])
+                        outside = 1;
+                }
+            if (edge) {
+                rim++;
+                sumRim += luma[p];
+                out += outside;
+            } else {
+                inner++;
+                sumIn += luma[p];
+            }
+            if (luma[p] > peak)
+                peak = luma[p];
+        }
+        if ((float)out > DYN_LAMP_OUTLINE * (float)(rim > 1 ? rim : 1) || peak < DYN_LAMP_PEAK || !inner || !rim ||
+            (double)sumIn / inner - (double)sumRim / rim < DYN_LAMP_SHADE)
+            continue;
+        if (!found || a > lamp->area) {
+            found = 1;
+            bestLab = lab[i];
+            lamp->cu = (float)cu;
+            lamp->cv = (float)cv;
+            lamp->area = a;
+        }
+    }
+    if (!found)
+        return 0;
+    {
+        /* The ring: three steps of 8-neighbour growth about the spot. */
+        U8 grow[N], next[N];
+        S32 step, sr = 0, sg = 0, sbl = 0, cnt = 0;
+        for (i = 0; i < N; i++)
+            grow[i] = lab[i] == bestLab;
+        for (step = 0; step < 3; step++) {
+            for (i = 0; i < N; i++) {
+                const S32 pu = i % DYN_ISO_W, pv = i / DYN_ISO_W;
+                S32 du, dv, g = grow[i];
+                for (dv = -1; dv <= 1 && !g; dv++)
+                    for (du = -1; du <= 1 && !g; du++) {
+                        const S32 qu = pu + du, qv = pv + dv;
+                        g = qu >= 0 && qu < DYN_ISO_W && qv >= 0 && qv < DYN_ISO_H && grow[qv * DYN_ISO_W + qu];
+                    }
+                next[i] = (U8)g;
+            }
+            for (i = 0; i < N; i++)
+                grow[i] = next[i];
+        }
+        for (i = 0; i < N; i++)
+            if (grow[i] && lab[i] != bestLab && opq[i] && luma[i] >= DYN_LAMP_RING) {
+                sr += pal[3 * idx[i]];
+                sg += pal[3 * idx[i] + 1];
+                sbl += pal[3 * idx[i] + 2];
+                cnt++;
+            }
+        if (!cnt) /* no glass about it: the spot's own colour */
+            for (i = 0; i < N; i++)
+                if (lab[i] == bestLab) {
+                    sr += pal[3 * idx[i]];
+                    sg += pal[3 * idx[i] + 1];
+                    sbl += pal[3 * idx[i] + 2];
+                    cnt++;
+                }
+        lamp->colour = (U8)DynLight_Nearest(pal, (float)sr / cnt, (float)sg / cnt, (float)sbl / cnt);
+    }
+    return 1;
+}
+
+/* The lava's light. Every lava cell open to the air above is a light,
+   DYN_LAVA_LIFT above the middle of its top (two cells' height, so the glow
+   climbs the walls about it), and a room's lava is a field of them kept at the
+   corners of its cells (every 512, 256 and 512 units), one value per face a
+   pixel may show (the top, +x, +z): how much of the lava's light that face
+   takes there, by the falloff and how squarely it faces each cell
+   (DynLight_IsoLambert). DYN_LAVA_ONE is what the top of a cell in the middle
+   of a lake takes, and lights DYN_LAVA_LEVEL; a pixel reads the corners about
+   it. */
+#define DYN_LAVA_GX 65
+#define DYN_LAVA_GY 26
+#define DYN_LAVA_GZ 65
+#define DYN_LAVA_CORNERS (DYN_LAVA_GX * DYN_LAVA_GY * DYN_LAVA_GZ)
+#define DYN_LAVA_REACH 2048.0f
+#define DYN_LAVA_LIFT 512    /* above the lava's top */
+#define DYN_LAVA_LAKE 8.855f /* the sum at a lake's middle, for this lift and reach */
+#define DYN_LAVA_ONE 4096
+#define DYN_LAVA_LEVEL 176
+
+static inline float DynLight_LambertF(float dot, float dist) {
+    const float c = dist > 0.0f ? dot / dist : 1.0f;
+    const float w = (c + DYN_ISO_WRAP) / (1.0f + DYN_ISO_WRAP);
+    return w <= 0.0f ? 0.0f : (w >= 1.0f ? 1.0f : w);
+}
+
+/* One lava light at (lx, ly, lz), into `acc` (3 floats per corner, the
+   corners z, then y, then x major). */
+static inline void DynLight_LavaAdd(float *acc, float lx, float ly, float lz) {
+    const float r2 = DYN_LAVA_REACH * DYN_LAVA_REACH, inv2 = 1.0f / r2;
+    S32 gx0 = (S32)ceilf((lx - DYN_LAVA_REACH) / 512.0f), gx1 = (S32)floorf((lx + DYN_LAVA_REACH) / 512.0f);
+    S32 gy0 = (S32)ceilf((ly - DYN_LAVA_REACH) / 256.0f), gy1 = (S32)floorf((ly + DYN_LAVA_REACH) / 256.0f);
+    S32 gz0 = (S32)ceilf((lz - DYN_LAVA_REACH) / 512.0f), gz1 = (S32)floorf((lz + DYN_LAVA_REACH) / 512.0f);
+    S32 gx, gy, gz;
+    gx0 = gx0 < 0 ? 0 : gx0;
+    gy0 = gy0 < 0 ? 0 : gy0;
+    gz0 = gz0 < 0 ? 0 : gz0;
+    gx1 = gx1 > DYN_LAVA_GX - 1 ? DYN_LAVA_GX - 1 : gx1;
+    gy1 = gy1 > DYN_LAVA_GY - 1 ? DYN_LAVA_GY - 1 : gy1;
+    gz1 = gz1 > DYN_LAVA_GZ - 1 ? DYN_LAVA_GZ - 1 : gz1;
+    for (gz = gz0; gz <= gz1; gz++)
+        for (gy = gy0; gy <= gy1; gy++) {
+            float *row = acc + ((size_t)(gz * DYN_LAVA_GY + gy) * DYN_LAVA_GX) * 3;
+            const float dy = ly - 256.0f * (float)gy, dz = lz - 512.0f * (float)gz;
+            for (gx = gx0; gx <= gx1; gx++) {
+                const float dx = lx - 512.0f * (float)gx, d2 = dx * dx + dy * dy + dz * dz;
+                float a, f, r;
+                if (d2 >= r2)
+                    continue;
+                a = 1.0f - d2 * inv2;
+                f = a * a;
+                r = sqrtf(d2);
+                row[gx * 3 + 0] += f * DynLight_LambertF(dy, r);
+                row[gx * 3 + 1] += f * DynLight_LambertF(dx, r);
+                row[gx * 3 + 2] += f * DynLight_LambertF(dz, r);
+            }
+        }
+}
+
+/* What a face (`ch`: 0 the top, 1 +x, 2 +z) at (X, Y, Z) takes of the lava,
+   DYN_LAVA_ONE at a lake's middle: the corners about the point, weighed by
+   how near it is to each. A point past the room's last corner reads it. */
+static inline S32 DynLight_LavaAt(const U16 *field, float X, float Y, float Z, S32 ch) {
+    float fx = X * (1.0f / 512.0f), fy = Y * (1.0f / 256.0f), fz = Z * (1.0f / 512.0f), tx, ty, tz, v;
+    S32 ix, iy, iz;
+    const U16 *c;
+    const size_t sy = (size_t)DYN_LAVA_GX * 3, sz = (size_t)DYN_LAVA_GY * DYN_LAVA_GX * 3;
+    fx = fx < 0.0f ? 0.0f : (fx > DYN_LAVA_GX - 1 ? (float)(DYN_LAVA_GX - 1) : fx);
+    fy = fy < 0.0f ? 0.0f : (fy > DYN_LAVA_GY - 1 ? (float)(DYN_LAVA_GY - 1) : fy);
+    fz = fz < 0.0f ? 0.0f : (fz > DYN_LAVA_GZ - 1 ? (float)(DYN_LAVA_GZ - 1) : fz);
+    ix = (S32)fx > DYN_LAVA_GX - 2 ? DYN_LAVA_GX - 2 : (S32)fx;
+    iy = (S32)fy > DYN_LAVA_GY - 2 ? DYN_LAVA_GY - 2 : (S32)fy;
+    iz = (S32)fz > DYN_LAVA_GZ - 2 ? DYN_LAVA_GZ - 2 : (S32)fz;
+    tx = fx - (float)ix;
+    ty = fy - (float)iy;
+    tz = fz - (float)iz;
+    c = field + ((size_t)(iz * DYN_LAVA_GY + iy) * DYN_LAVA_GX + ix) * 3 + ch;
+    v = (1.0f - tz) * ((1.0f - ty) * ((1.0f - tx) * c[0] + tx * c[3]) + ty * ((1.0f - tx) * c[sy] + tx * c[sy + 3])) +
+        tz * ((1.0f - ty) * ((1.0f - tx) * c[sz] + tx * c[sz + 3]) +
+              ty * ((1.0f - tx) * c[sz + sy] + tx * c[sz + sy + 3]));
+    return (S32)(v + 0.5f);
+}
+
 /* Engine hooks (DYNLIGHT.CPP). Each returns at once while DynLight is 0, but
    DynLight_CubeLoaded, which keeps the cube's number for when it is turned on.
    The lamps of a cube are found the first time it is drawn with the light on

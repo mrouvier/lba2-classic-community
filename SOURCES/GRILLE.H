@@ -15,6 +15,7 @@ extern PTR_U8 BufferMaskBrick;
 extern PTR_U8 BufMap;
 extern PTR_U8 TabBlock;
 extern PTR_U8 BufferBrick;
+extern S32 ForbidenBrick; /* the room's brick AffBrickBlock never draws, packed */
 
 /* Called after each brick of the room's grid is drawn into the frame
    (AffGrille, AffGrilleLabyrinthe), with its packed brick number (the mask
