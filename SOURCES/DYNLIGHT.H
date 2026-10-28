@@ -125,14 +125,57 @@ static inline S32 DynLight_Luma(const U8 *rgb) {
     return (rgb[0] * 77 + rgb[1] * 150 + rgb[2] * 29) >> 8;
 }
 
+/* A colour's hue in degrees (0..360) and its chroma (max - min channel). */
+static inline S32 DynLight_Hue(const U8 *rgb, S32 *chroma) {
+    const S32 r = rgb[0], g = rgb[1], b = rgb[2];
+    const S32 mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    const S32 mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    const S32 c = mx - mn;
+    S32 h;
+    *chroma = c;
+    if (c == 0)
+        return 0;
+    if (mx == r)
+        h = (60 * (g - b)) / c;
+    else if (mx == g)
+        h = 120 + (60 * (b - r)) / c;
+    else
+        h = 240 + (60 * (r - g)) / c;
+    return h < 0 ? h + 360 : h;
+}
+
+/* Whether a lit colour may become entry e of its ramp. A ramp is the
+   shading of one material, and climbs it as the artists drew it, but the
+   palette's first and last ramps are not: they hold primaries and odd
+   colours side by side (a dark red next to a violet, an orange next to a
+   cyan, then whites). There a colour with a hue climbs only to entries of a
+   hue within DYN_LIGHT_HUE_SPAN, or to a near white; a grey, whose hue means
+   nothing, climbs anywhere. */
+#define DYN_LIGHT_HUE_SPAN 30 /* degrees */
+#define DYN_LIGHT_GREY 24     /* chroma under which a colour has no hue to keep */
+static inline S32 DynLight_SameHue(const U8 *pal, S32 c, S32 e) {
+    S32 cc, ce, hc, he, d;
+    if (e == c || ((c >> 4) != 0 && (c >> 4) != 15))
+        return 1;
+    hc = DynLight_Hue(pal + c * 3, &cc);
+    if (cc < DYN_LIGHT_GREY)
+        return 1;
+    he = DynLight_Hue(pal + e * 3, &ce);
+    if (ce < DYN_LIGHT_GREY + 8)
+        return DynLight_Luma(pal + e * 3) >= 160; /* a near white: a hot colour whitens */
+    d = hc > he ? hc - he : he - hc;
+    if (d > 180)
+        d = 360 - d;
+    return d <= DYN_LIGHT_HUE_SPAN;
+}
+
 /* The surface table: SurfLUT[k][c] is colour c lit at level k (0..15), the
-   entry of c's own 16-shade ramp, at or above c's step, whose luma is closest
-   to luma(c) brightened by k/15 of a gain and a lift. Level 0 leaves every
-   colour as it is, and every level keeps a colour in its ramp, so the fog and
-   shade tables that index by ramp still read it right. Colour 0, the clear
-   colour (the void about an interior's room), is left black: its ramp holds
-   the primaries, and climbing it would turn the void red. `pal` is 768 bytes
-   of 8-bit RGB. */
+   entry of c's own 16-shade ramp, at or above c's step and of its hue
+   (DynLight_SameHue), whose luma is closest to luma(c) brightened by k/15 of
+   a gain and a lift. Level 0 leaves every colour as it is, and every level
+   keeps a colour in its ramp, so the fog and shade tables that index by ramp
+   still read it right. Colour 0, the clear colour (the void about an
+   interior's room), is left black. `pal` is 768 bytes of 8-bit RGB. */
 #define DYN_LIGHT_GAIN 256 /* luma * (1 + gain/256 * k/15) */
 #define DYN_LIGHT_LIFT 40  /* + lift * k/15 */
 static inline void DynLight_BuildSurf(const U8 *pal, U8 *lut) {
@@ -140,7 +183,7 @@ static inline void DynLight_BuildSurf(const U8 *pal, U8 *lut) {
     for (c = 0; c < 256; c++)
         lut[c] = (U8)c;
     for (k = 1; k < 16; k++) {
-        lut[k * 256] = 0; /* the clear colour, the void about a room: it stays black */
+        lut[k * 256] = 0;
         for (c = 1; c < 256; c++) {
             const S32 luma = DynLight_Luma(pal + c * 3);
             const S32 target = luma + (luma * DYN_LIGHT_GAIN * k) / (256 * 15) + (DYN_LIGHT_LIFT * k) / 15;
@@ -149,7 +192,7 @@ static inline void DynLight_BuildSurf(const U8 *pal, U8 *lut) {
                 const S32 e = (c & 0xF0) | s;
                 const S32 d = DynLight_Luma(pal + e * 3) - target;
                 const S32 err = d < 0 ? -d : d;
-                if (err < bestErr) {
+                if (err < bestErr && DynLight_SameHue(pal, c, e)) {
                     bestErr = err;
                     best = e;
                 }
