@@ -99,6 +99,27 @@ static void test_the_surface_table_keeps_the_ramp(void) {
     ASSERT_TRUE((lut[15 * 256 + 0x45] & 15) > 5);
 }
 
+/* The palette's odd first ramp: greys, a dark red, a brighter red, a violet
+   and a yellow side by side, as the interiors' palette has them. */
+static void test_a_lit_colour_keeps_its_hue(void) {
+    static U8 pal[768], lut[16 * 256];
+    ramp_palette(pal);
+    pal[4 * 3 + 0] = 115, pal[4 * 3 + 1] = 0, pal[4 * 3 + 2] = 0;        /* dark red */
+    pal[5 * 3 + 0] = 150, pal[5 * 3 + 1] = 10, pal[5 * 3 + 2] = 10;      /* red */
+    pal[6 * 3 + 0] = 190, pal[6 * 3 + 1] = 30, pal[6 * 3 + 2] = 20;      /* bright red */
+    pal[7 * 3 + 0] = 230, pal[7 * 3 + 1] = 220, pal[7 * 3 + 2] = 0;      /* yellow */
+    pal[8 * 3 + 0] = 124, pal[8 * 3 + 1] = 0, pal[8 * 3 + 2] = 220;      /* violet */
+    pal[15 * 3 + 0] = 252, pal[15 * 3 + 1] = 252, pal[15 * 3 + 2] = 252; /* white */
+    DynLight_BuildSurf(pal, lut);
+    for (S32 k = 1; k < 16; k++) {
+        const S32 e = lut[k * 256 + 4];
+        ASSERT_TRUE(e != 7 && e != 8); /* never the yellow nor the violet beside it */
+    }
+    ASSERT_TRUE(lut[8 * 256 + 4] != 4); /* and it does climb */
+    /* A plain ramp climbs as before. */
+    ASSERT_TRUE((lut[15 * 256 + 0x45] & 15) > 5);
+}
+
 static void test_the_falloff(void) {
     ASSERT_EQ_INT(240, DynLight_Falloff(0, 1000000, 240));
     ASSERT_EQ_INT(0, DynLight_Falloff(1000000, 1000000, 240));
@@ -305,6 +326,7 @@ int main(void) {
     RUN_TEST(test_no_pool_on_plain_or_dim_ground);
     RUN_TEST(test_the_map_edge_is_read_safely);
     RUN_TEST(test_the_surface_table_keeps_the_ramp);
+    RUN_TEST(test_a_lit_colour_keeps_its_hue);
     RUN_TEST(test_the_falloff);
     RUN_TEST(test_a_lamp_is_a_filled_ringed_pool_under_the_decor);
     RUN_TEST(test_the_globe_is_the_highest_polygon);
