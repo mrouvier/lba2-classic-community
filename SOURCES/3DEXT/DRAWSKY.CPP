@@ -7,6 +7,10 @@ static void PathVertex(STRUC_CLIPVERTEX *v, S32 x, S32 y, S32 z) {
     v->V_Z0 = *TerrPath->Zr - Z0;
 }
 
+/* Set while DrawOneSea fills the open sea, so Draw_Poly hands the sea's quads
+   to the moving sea (SEA_FX.H) and no other quad. */
+static S32 s_seaPass = FALSE;
+
 S32 Draw_Poly(STRUC_CLIPVERTEX src[], S32 type) {
     S32 k, l;
     STRUC_CLIPVERTEX dst[10];
@@ -31,6 +35,9 @@ S32 Draw_Poly(STRUC_CLIPVERTEX src[], S32 type) {
                 Tab_Points[l].Pt_W = INV64(dst[l].V_Z0);
                 Tab_Points[l].Pt_ZO = GET_ZO(dst[l].V_Z0);
             }
+
+            if (s_seaPass)
+                SeaFx_Quad(Tab_Points, k);
 
             if (Fill_Poly(type, 0, k, Tab_Points))
                 return TRUE;
@@ -82,10 +89,11 @@ void DrawOneSea(S32 y) // Si on souhaite que l'eau ne soit pas au niveau 0 :)
     U32 i, j, xx, zz;
     S32 b;
 
-    PtrMap = SkySeaTexture;
+    PtrMap = SeaFx_Map(SkySeaTexture);
     RepMask = 0x7F7F;
     PtrCLUTGouraud = PtrCLUTFog;
     SetCLUT(PalLevel);
+    s_seaPass = TRUE;
 
     b = 0;
 
@@ -136,4 +144,5 @@ void DrawOneSea(S32 y) // Si on souhaite que l'eau ne soit pas au niveau 0 :)
             b++;
         }
     }
+    s_seaPass = FALSE;
 }

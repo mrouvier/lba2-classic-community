@@ -952,6 +952,8 @@ S32 Filler_TextureGouraudNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
     U32 v = Fill_CurMapVMin;
     Fill_CurY += count;
     U32 patch = Fill_Patch - 1;
+    /* The terrain's water redraw filters here, objects do not (POLYFILT.H). */
+    const S32 filter = PolyTexFilterNZW ? PolyTexFilter : POLY_TEX_FILTER_OFF;
 
     if (patch == 0) {
         Fill_Patch = patch;
@@ -1043,7 +1045,28 @@ S32 Filler_TextureGouraudNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
                 if (GTEX_PtrZBufferPatch[offset] >= (decV_intZ & 0xFFFF)) {
                     colorIndex = (colorIndex & 0xFFFFFF00) | (GTEX_PtrMapPatch[mask] & 0xFF);
                     colorIndex = (colorIndex & 0xFFFFFF00) | GTEX_PtrCLUT[colorIndex];
-                    GTEX_PtrLog[offset] = colorIndex & 0xFF;
+                    U8 outIdx = (U8)(colorIndex & 0xFF);
+                    if (filter != POLY_TEX_FILTER_OFF) {
+                        /* As Filler_TextureGouraudZBuf: shade each tap through
+                           the CLUT, then blend the display-palette indices. */
+                        const U32 gour = colorIndex & 0xFF00;
+                        const U32 qu = ((decU >> 24) & 0xFF) >> 6;
+                        const U32 iU = ((mask & 0xFF00) | ((mask + 1) & 0xFF)) &
+                                       GTEX_RepMaskPatch;
+                        const U8 bU = GTEX_PtrCLUT[gour | GTEX_PtrMapPatch[iU]];
+                        outIdx = POLY_BLEND(outIdx, bU, qu);
+                        if (filter == POLY_TEX_FILTER_BILINEAR) {
+                            const U32 iV = (((mask + 0x100) & 0xFF00) | (mask & 0xFF)) &
+                                           GTEX_RepMaskPatch;
+                            const U32 iUV = ((iV & 0xFF00) | (iU & 0xFF)) & GTEX_RepMaskPatch;
+                            const U8 aV = GTEX_PtrCLUT[gour | GTEX_PtrMapPatch[iV]];
+                            const U8 bV = GTEX_PtrCLUT[gour | GTEX_PtrMapPatch[iUV]];
+                            const U8 lower = POLY_BLEND(aV, bV, qu);
+                            const U32 qv = ((decV_intZ >> 24) & 0xFF) >> 6;
+                            outIdx = POLY_BLEND(outIdx, lower, qv);
+                        }
+                    }
+                    GTEX_PtrLog[offset] = outIdx;
                 }
 
                 U8 carry = ((U64)decU + (U64)GTEX_DecMapU) > 0xFFFFFFFF;
@@ -1099,6 +1122,8 @@ S32 Filler_TextureGouraudChromaKeyNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurX
     U32 v = Fill_CurMapVMin;
     Fill_CurY += count;
     U32 patch = Fill_Patch - 1;
+    /* The terrain's water redraw filters here, objects do not (POLYFILT.H). */
+    const S32 filter = PolyTexFilterNZW ? PolyTexFilter : POLY_TEX_FILTER_OFF;
 
     if (patch == 0) {
         Fill_Patch = patch;
@@ -1186,7 +1211,35 @@ S32 Filler_TextureGouraudChromaKeyNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurX
 
                 if (texel != 0 && GTEX_PtrZBufferPatch[offset] >= (decV_intZ & 0xFFFF)) {
                     colorIndex = (colorIndex & 0xFFFFFF00) | GTEX_PtrCLUT[colorIndex];
-                    GTEX_PtrLog[offset] = colorIndex & 0xFF;
+                    U8 outIdx = (U8)(colorIndex & 0xFF);
+                    if (filter != POLY_TEX_FILTER_OFF) {
+                        /* As Filler_TextureGouraudChromaKeyZBuf: only opaque
+                           taps blend, so the key colour stays out of the
+                           silhouette. */
+                        const U32 gour = colorIndex & 0xFF00;
+                        const U32 qu = ((decU >> 24) & 0xFF) >> 6;
+                        const U32 iU = ((mask & 0xFF00) | ((mask + 1) & 0xFF)) &
+                                       GTEX_RepMaskPatch;
+                        const U8 tU = GTEX_PtrMapPatch[iU];
+                        if (tU != 0) {
+                            outIdx = POLY_BLEND(outIdx, GTEX_PtrCLUT[gour | tU], qu);
+                        }
+                        if (filter == POLY_TEX_FILTER_BILINEAR) {
+                            const U32 iV = (((mask + 0x100) & 0xFF00) | (mask & 0xFF)) &
+                                           GTEX_RepMaskPatch;
+                            const U32 iUV = ((iV & 0xFF00) | (iU & 0xFF)) &
+                                            GTEX_RepMaskPatch;
+                            const U8 tV = GTEX_PtrMapPatch[iV];
+                            const U8 tUV = GTEX_PtrMapPatch[iUV];
+                            if (tV != 0 && tUV != 0) {
+                                const U8 lower = POLY_BLEND(GTEX_PtrCLUT[gour | tV],
+                                                            GTEX_PtrCLUT[gour | tUV], qu);
+                                const U32 qv = ((decV_intZ >> 24) & 0xFF) >> 6;
+                                outIdx = POLY_BLEND(outIdx, lower, qv);
+                            }
+                        }
+                    }
+                    GTEX_PtrLog[offset] = outIdx;
                 }
 
                 U8 carry = ((U64)decU + (U64)GTEX_DecMapU) > 0xFFFFFFFF;

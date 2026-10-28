@@ -3,6 +3,7 @@
 #include <SYSTEM/ADELINE_TYPES.H>
 #include <SYSTEM/LE.H>
 #include <ANIM/LIBINIT.H>
+#include <3D/DATAMAT.H> /* TYPE_MAT: ObjLightHook's matrices */
 
 // -----------------------------------------------------------------------------
 #ifdef __cplusplus
@@ -143,6 +144,17 @@ extern U8 *ObjPtrMap; // Ptr on the current texture page
 extern T_OBJ_POINT Obj_ListRotatedPoints[];
 
 extern Func_TransNumPtr *TransFctBody; // Pointer to a conversion fct that converts a body number into its address
+
+/* Called once a body is lit by the scene's light and seen, before its polygons
+   are built (ObjectDisplay, BodyDisplay): `lights` is ListLights, the 8.8
+   shade of each vertex then each face normal, which the hook may raise.
+   `mats` are the body's group matrices (TabMat), `nbMats` how many (1 for
+   BodyDisplay, which draws every point through the first), `posX..posZ` the
+   body's origin relative to the camera, in the camera's axes (PosXWr..). NULL
+   unless point lights listen (SOURCES/DYNLIGHT.CPP). */
+typedef void(Func_ObjLight)(const T_BODY_HEADER *body, const TYPE_MAT *mats, S32 nbMats, S32 posX, S32 posY, S32 posZ,
+                            U16 *lights);
+extern Func_ObjLight *ObjLightHook;
 
 // -----------------------------------------------------------------------------
 extern S32 ObjectDisplay(T_OBJ_3D *obj);

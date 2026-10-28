@@ -13,6 +13,7 @@
  *══════════════════════════════════════════════════════════════════════════*/
 
 #include "C_EXTERN.H"
+#include "DYNLIGHT.H"  /* the interior bricks leave their positions for the lights */
 #include "FOLLOWCAM.H" /* FollowCamForgetLoan: a recentre ends a scripted shot's loan */
 
 extern T_OBJET *APtObj; // dans OBJECT.CPP
@@ -145,11 +146,14 @@ void RefreshGrille() {
 #endif
         switch (CubeMode) {
         case CUBE_INTERIEUR:
+            /* Each brick drawn leaves its position, for the dynamic lighting. */
+            DynLight_IsoBegin();
             if (ModeLabyrinthe) {
                 AffGrilleOnly();       // Pour recalculer le Z-Buffer
                 AffGrilleLabyrinthe(); // Pour redessiner la Map
             } else
                 AffGrille();
+            DynLight_IsoEnd();
             break;
 
         case CUBE_EXTERIEUR:

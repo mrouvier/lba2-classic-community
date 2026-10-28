@@ -1724,6 +1724,8 @@ S32 Filler_TextureFogNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
     U32 u = Fill_CurMapUMin;
     U32 v = Fill_CurMapVMin;
     U32 patch = Fill_Patch - 1;
+    /* The terrain's water redraw filters here, objects do not (POLYFILT.H). */
+    const S32 filter = PolyTexFilterNZW ? PolyTexFilter : POLY_TEX_FILTER_OFF;
 
     if (patch == 0) {
         Fill_Patch = patch;
@@ -1779,7 +1781,27 @@ S32 Filler_TextureFogNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
             do {
                 if ((decU_intZ & 0xFFFF) <= POLYTEXT_PtrZBufferPatch[offset]) {
                     U8 color = POLYTEXT_PtrMapPatch[mapIndex];
-                    POLYTEXT_PtrLog[offset] = Fill_Logical_Palette[color];
+                    U8 outIdx = Fill_Logical_Palette[color];
+                    if (filter != POLY_TEX_FILTER_OFF) {
+                        /* As Filler_TextureFogZBuf: U fraction in the top byte
+                           of decU_intZ, V in the top byte of lineVDec. */
+                        const U32 qu = ((decU_intZ >> 24) & 0xFF) >> 6;
+                        const U32 iU = ((mapIndex & 0xFF00) | ((mapIndex + 1) & 0xFF)) &
+                                       POLYTEXT_RepMaskPatch;
+                        const U8 bU = Fill_Logical_Palette[POLYTEXT_PtrMapPatch[iU]];
+                        outIdx = POLY_BLEND(outIdx, bU, qu);
+                        if (filter == POLY_TEX_FILTER_BILINEAR) {
+                            const U32 iV = (((mapIndex + 0x100) & 0xFF00) | (mapIndex & 0xFF)) &
+                                           POLYTEXT_RepMaskPatch;
+                            const U32 iUV = ((iV & 0xFF00) | (iU & 0xFF)) & POLYTEXT_RepMaskPatch;
+                            const U8 aV = Fill_Logical_Palette[POLYTEXT_PtrMapPatch[iV]];
+                            const U8 bV = Fill_Logical_Palette[POLYTEXT_PtrMapPatch[iUV]];
+                            const U8 lower = POLY_BLEND(aV, bV, qu);
+                            const U32 qv = ((lineVDec >> 24) & 0xFF) >> 6;
+                            outIdx = POLY_BLEND(outIdx, lower, qv);
+                        }
+                    }
+                    POLYTEXT_PtrLog[offset] = outIdx;
                 }
 
                 offset++;
@@ -1825,6 +1847,8 @@ S32 Filler_TextureChromaKeyFogNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax)
     U32 u = Fill_CurMapUMin;
     U32 v = Fill_CurMapVMin;
     U32 patch = Fill_Patch - 1;
+    /* The terrain's water redraw filters here, objects do not (POLYFILT.H). */
+    const S32 filter = PolyTexFilterNZW ? PolyTexFilter : POLY_TEX_FILTER_OFF;
 
     if (patch == 0) {
         Fill_Patch = patch;
@@ -1884,6 +1908,35 @@ S32 Filler_TextureChromaKeyFogNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax)
                     U8 textureColor = POLYTEXT_PtrMapPatch[mapIndex];
                     if (textureColor != 0) {
                         U8 foggedColor = Fill_Logical_Palette[textureColor];
+                        if (filter != POLY_TEX_FILTER_OFF) {
+                            /* As Filler_TextureChromaKeyFogZBuf: only opaque
+                               taps blend, so the key colour stays out of the
+                               silhouette. */
+                            const U32 qu = ((decU_intZ >> 24) & 0xFF) >> 6;
+                            const U32 iU = ((mapIndex & 0xFF00) | ((mapIndex + 1) & 0xFF)) &
+                                           POLYTEXT_RepMaskPatch;
+                            const U8 tU = POLYTEXT_PtrMapPatch[iU];
+                            if (tU != 0) {
+                                foggedColor = POLY_BLEND(foggedColor,
+                                                         Fill_Logical_Palette[tU], qu);
+                            }
+                            if (filter == POLY_TEX_FILTER_BILINEAR) {
+                                const U32 iV = (((mapIndex + 0x100) & 0xFF00) |
+                                                (mapIndex & 0xFF)) &
+                                               POLYTEXT_RepMaskPatch;
+                                const U32 iUV = ((iV & 0xFF00) | (iU & 0xFF)) &
+                                                POLYTEXT_RepMaskPatch;
+                                const U8 tV = POLYTEXT_PtrMapPatch[iV];
+                                const U8 tUV = POLYTEXT_PtrMapPatch[iUV];
+                                if (tV != 0 && tUV != 0) {
+                                    const U8 lower =
+                                        POLY_BLEND(Fill_Logical_Palette[tV],
+                                                   Fill_Logical_Palette[tUV], qu);
+                                    const U32 qv = ((lineVDec >> 24) & 0xFF) >> 6;
+                                    foggedColor = POLY_BLEND(foggedColor, lower, qv);
+                                }
+                            }
+                        }
                         POLYTEXT_PtrLog[offset] = foggedColor;
                     }
                 }

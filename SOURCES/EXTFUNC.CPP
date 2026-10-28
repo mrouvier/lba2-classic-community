@@ -8,6 +8,8 @@
  *══════════════════════════════════════════════════════════════════════════*/
 
 #include "C_EXTERN.H"
+#include "SEA_FX.H" /* SeaFx_FrameBegin: the sea kept from each full redraw */
+#include "DYNLIGHT.H" /* the street lamps baked into the background */
 #include "DIRECTORIES.H"
 #include "INPUT.H"
 
@@ -19,6 +21,7 @@
 #include "FOLLOWCAM.H"
 #include "FOLLOWCAM_CFG.H"
 #include "FOLLOWCAM_MATH.H"
+#include "EXTFOV.H" /* the focal and near clip for this framebuffer */
 #include "JOYSTICK.H"
 #include "BOOT_EXIT.H"
 #include "MOUSE_CAPTURE.H"
@@ -101,19 +104,13 @@ void Init3DExtView(void) {
     // At the default 640x480 this is the original (320, 240) — the hardcoded
     // literal Phase 0 of the widescreen plan flagged; see docs/WIDESCREEN.md
     // and docs/WIDESCREEN_PROJECTION_AUDIT.md.
-    // Near clip scales down as the framebuffer grows taller. The focal is fixed
-    // (ChampX/ChampZ), so a taller frame reveals more vertical FOV, which pulls
-    // the bottom of the frustum's ground intersection closer to the camera. The
-    // terrain trivial-rejects whole cells whose depth is within the near plane
-    // (zr <= NearClip in TERRAIN.CPP MaskVisible), so a fixed plane drops near
-    // terrain/buildings that are plainly in view at HD ("clipped on the right").
-    // Scale it with height to keep the near plane at the original screen-space
-    // position. Exact CLIP_NEAR at the original 480, so 480 is unchanged.
-    S32 nearClip = CLIP_NEAR;
-    if (ModeDesiredY > 480)
-        nearClip = CLIP_NEAR * 480 / (S32)ModeDesiredY;
-    SetProjection((S32)(ModeDesiredX / 2), (S32)(ModeDesiredY / 2),
-                  nearClip, ChampX, ChampZ);
+    // The focal and the near clip depend on the frame's height and on whether
+    // the exterior view keeps its 1997 vertical extent (EXTFOV.H): with the
+    // fixed focal a taller frame shows more world and the near plane moves in
+    // with it; with the lock the focal grows with the height and the plane is
+    // the original's. Both are exact at 480.
+    SetProjection((S32)(ModeDesiredX / 2), (S32)(ModeDesiredY / 2), ExtFov_NearClipNow(CLIP_NEAR),
+                  ExtFov_FocalNow(ChampX), ExtFov_FocalNow(ChampZ));
     FollowCamApplyShownView();
 
     SetLightVector(AlphaLight, BetaLight, 0);
@@ -324,6 +321,8 @@ void AffGrilleExt() {
     Switch_Fillers(FILL_POLY_FOG_ZBUFFER);
 
     ClearAniPoly();
+    SeaFx_FrameBegin();
+    DynLight_FrameBegin();
 
     ClsTerrainZBuf();
 
@@ -349,8 +348,12 @@ void AffGrilleExt() {
     ManageSystem(); // for streaming
 
     FiltreAnimatedPolys();
+    SeaFx_DropHidden();
 
     Switch_Fillers(FILL_POLY_TEXTURES);
+
+    /* The lamps the cubes gathered, into the frame the background is kept from. */
+    DynLight_BakeBackground();
 
     CopyScreen(Log, Screen);
 

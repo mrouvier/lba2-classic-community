@@ -54,9 +54,9 @@ The Auto camera re-evaluates the rule every frame it runs, so **code that writes
 
 ### Off-screen recenter (original behavior)
 
-When the hero projects outside the screen clip bounds (`MainLoop` in [PERSO.CPP](../SOURCES/PERSO.CPP)):
+When the hero projects outside the screen clip bounds (`MainLoop` in [PERSO.CPP](../SOURCES/PERSO.CPP)), less a margin of 80, 100, 80 and 50 pixels on the left, right, top and bottom:
 
-- **Exterior:** `StartXCube`/`StartZCube` snap to the hero's rotated position, then `CameraCenter(0)` applies it without reorienting `BetaCam`.
+- **Exterior:** `StartXCube`/`StartZCube` snap to the hero's rotated position, then `CameraCenter(0)` applies it without reorienting `BetaCam`. The margins are 1997 pixels; under the exterior view lock they follow the focal (`ExtFov_Margin`), so the snap fires at the original distance from the edge at any height.
 - **Interior:** the half-step follow above.
 
 ### Manual controls
@@ -219,7 +219,7 @@ The Auto camera applies its view with `CameraCenter(3)`: current globals only, w
 
 ### HD recompose (tall render heights)
 
-The exterior projection has a fixed focal (`ChampX`/`ChampZ` = 600), so a taller framebuffer shows more vertical field of view instead of zooming: the frame fills with sky and the hero shrinks ([WIDESCREEN.md](WIDESCREEN.md), "Vertical framing at HD"). With `k = ModeDesiredY / 480`, each apply pulls the boom in, steepens the pitch and shortens the forward lean in proportion to `k - 1`, so every term is a no-op at 480.
+The exterior projection has a fixed focal (`ChampX`/`ChampZ` = 600), so a taller framebuffer shows more vertical field of view instead of zooming: the frame fills with sky and the hero shrinks ([WIDESCREEN.md](WIDESCREEN.md), "Vertical framing at HD"). With `k = view height / 480`, each apply pulls the boom in, steepens the pitch and shortens the forward lean in proportion to `k - 1`, so every term is a no-op at 480. The view height is the frame's, or 480 under the exterior view lock (`ExteriorFov`, `ExtFov_ViewHeightNow` in [SOURCES/EXTFOV.CPP](../SOURCES/EXTFOV.CPP)), which scales the focal with the height instead and so removes the extra vertical view the recompose exists to correct: under it the recompose stands down at every resolution.
 
 - **Render-time only.** The player's `AlphaCam` and `FollowCamBaseDist` are adjusted for the `CameraCenter(3)` call and restored.
 - **Auto path only**, never in a camera zone, the classic camera or an interior.

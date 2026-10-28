@@ -6,6 +6,8 @@
 #include "FOLLOWCAM.H" /* FollowCamera: camera zones re-aim the Auto camera */
 #include "RECORD.H"    /* Record_SeedHook: the boot scene load's seed on a replay */
 #include "SAVEGAME.H"
+#include "SEA_FX.H"    /* the open sea refilled between full redraws */
+#include "DYNLIGHT.H"  /* the lamps and the moving lights over the scene */
 #include "ZONE_GEOM.H" // ZonePointInBox -- single source of truth for the zone box test
 
 #include <SYSTEM/LOG.H> // cubetrace
@@ -4945,6 +4947,9 @@ S32 AffOneObject(T_SORT *pt) {
             SetClip(0, 0, ModeDesiredX - 1, FlagWater);
         }
 
+        /* A body baked into the background keeps the lights it had then:
+           only the static ones light it (DynLight_BodyBackground). */
+        DynLight_BodyBackground((ptrobj->Flags & OBJ_BACKGROUND) != 0);
         aff = ObjectDisplay(&ptrobj->Obj);
 
         if (aff) /* objet pas tout clippé */
@@ -5025,6 +5030,8 @@ S32 AffOneObject(T_SORT *pt) {
                 if ((ptrobj->Flags & OBJ_BACKGROUND)
                         AND((FlagFlip == AFF_ALL_FLIP)
                                 OR(FlagFlip == AFF_ALL_NO_FLIP))) {
+                    SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
+                    DynLight_Baking(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                     CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                               ClipXMin, ClipYMin, Screen);
                 }
@@ -5112,11 +5119,13 @@ S32 AffOneObject(T_SORT *pt) {
             // sprites
             if (ClipXMin <= ClipXMax
                                 AND ClipYMin <= ClipYMax) {
+                DynLight_SpriteBegin(num, SpriteX, SpriteY);
                 PtrAffGraph(SpriteX, SpriteY, num);
                 UnsetClip();
                 SetClip(ScreenXMin, ScreenYMin, ScreenXMax, ScreenYMax);
             }
         } else {
+            DynLight_SpriteBegin(num, SpriteX, SpriteY);
             PtrAffGraph(SpriteX, SpriteY, num);
             SetClip(ScreenXMin, ScreenYMin, ScreenXMax, ScreenYMax);
         }
@@ -5124,6 +5133,12 @@ S32 AffOneObject(T_SORT *pt) {
         if (ClipXMin <= ClipXMax
                             AND ClipYMin <= ClipYMax) {
             ptrobj->WorkFlags |= WAS_DRAWN;
+
+            DynLight_SpriteEnd(ptrobj->Obj.X + (ptrobj->XMin + ptrobj->XMax) / 2,
+                               ptrobj->Obj.Y + (ptrobj->YMin + ptrobj->YMax) / 2,
+                               ptrobj->Obj.Z + (ptrobj->ZMin + ptrobj->ZMax) / 2,
+                               (ptrobj->Flags & OBJ_BACKGROUND)
+                                   AND((FlagFlip == AFF_ALL_FLIP) OR(FlagFlip == AFF_ALL_NO_FLIP)));
 
             if (ptrobj->Flags & SPRITE_CLIP) {
                 DrawRecover3(ptrobj->Obj.LastAnimStepX,
@@ -5151,6 +5166,8 @@ S32 AffOneObject(T_SORT *pt) {
             if ((ptrobj->Flags & OBJ_BACKGROUND)
                     AND((FlagFlip == AFF_ALL_FLIP)
                             OR(FlagFlip == AFF_ALL_NO_FLIP))) {
+                SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
+                DynLight_Baking(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                           ClipXMin, ClipYMin, Screen);
             }
@@ -5237,6 +5254,8 @@ S32 AffOneObject(T_SORT *pt) {
             if ((ptrobj->Flags & OBJ_BACKGROUND)
                     AND((FlagFlip == AFF_ALL_FLIP)
                             OR(FlagFlip == AFF_ALL_NO_FLIP))) {
+                SeaFx_Baked(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
+                DynLight_Baking(ClipXMin, ClipYMin, ClipXMax, ClipYMax);
                 CopyBlock(ClipXMin, ClipYMin, ClipXMax, ClipYMax, Log,
                           ClipXMin, ClipYMin, Screen);
             }
@@ -5346,6 +5365,7 @@ S32 AffOneObject(T_SORT *pt) {
     case TYPE_DART:
         ptrd = &ListDart[numobj];
 
+        DynLight_BodyBackground(FALSE);
         aff = BodyDisplay_AlphaBeta(ptrd->PosX, ptrd->PosY, ptrd->PosZ,
                                     ptrd->Alpha, ptrd->Beta, 0,
                                     (U8 *)GivePtrObjFix(ptrd->Body));
@@ -5480,8 +5500,10 @@ startaffscene:
         BoxClean(); // ATTENTION: rajouté le 30/05/97
         if (!FlagAnimWhoSpeak) {
             RestoreCinemaMode(); // Scrolle les bandes noires
-            if (CubeMode == CUBE_EXTERIEUR)
+            if (CubeMode == CUBE_EXTERIEUR) {
                 DrawAnimatedPolys();
+                SeaFx_Refill();
+            }
         }
         break;
 
@@ -5851,7 +5873,10 @@ startaffscene:
     PtrMap = ObjPtrMap = BufferTexture;
     RepMask = 0xFFFF;
 
+    /* The point lights on the bodies BaseSort draws, and on no other. */
+    DynLight_BeginBodies();
     if (BaseSort()) {
+        DynLight_EndBodies();
         // NumObjFollow masqué on
         // doit redessiner la camera
         if (flagflip == AFF_ALL_FLIP OR flagflip == AFF_ALL_NO_FLIP) {
@@ -5862,6 +5887,7 @@ startaffscene:
         flagflip = AFF_ALL_FLIP;
         goto startaffscene;
     }
+    DynLight_EndBodies();
 
     /*------------------------------------------------------------------------*/
     if (CubeMode == CUBE_EXTERIEUR) {
@@ -5871,6 +5897,10 @@ startaffscene:
         SetCLUT(PalLevel);
         Switch_Fillers(FILL_POLY_TEXTURES);
     }
+
+    /* The moving lights over the background the scene shows, once the scene
+       is whole and before any text is drawn over it (DYNLIGHT.H). */
+    DynLight_MovingPass();
 
     /*------------------------------------------------------------------------*/
     // special incrust disp

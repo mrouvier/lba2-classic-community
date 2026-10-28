@@ -14,6 +14,22 @@
 extern U32 Fill_Fog_Factor;
 extern U32 Fill_ScaledFogNear;
 
+S32 PolyFogDither = 0;
+
+/* The dithered fog row of a span for each of the four column phases, from the
+   span's framebuffer offset and its raw fog value. The offset names the row
+   the span is on; Fill_CurY does not, being already past the lines this call
+   fills. Answers the span's first column, so pixel px of the span takes
+   rows[(col + px) & 3]: the depth is fixed for the span, the threshold's row
+   for the line, and only the column's phase changes along it. */
+static U32 PolyTZF_FogDitherRows(U32 ofs, U32 fogRaw, U32 rows[4]) {
+    const U32 row = ofs / ScreenPitch;
+    const U32 col = ofs - row * ScreenPitch;
+    for (U32 i = 0; i < 4; i++)
+        rows[(col + i) & 3] = PolyTZF_FogDitherRow(fogRaw, col + i, row);
+    return col;
+}
+
 /* Local perspective state for Z-buffer fog smooth filler.
  * POLYTZF uses PERSP_VALUE=32 (shift=5) unlike POLYTEXZ's 16 (shift=4).
  * The FPU stack carries ZBuf/Z alongside U/Z and V/Z. */
@@ -216,23 +232,39 @@ S32 Filler_TextureZFogSmooth(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
                 S32 zBuf = Fill_CurZBuf >> 8;
                 S32 fogDist = zBuf - (S32)Fill_ScaledFogNear;
                 U32 fogRow;
+                U32 fogRaw = 0;
                 if (fogDist < 0) {
                     fogRow = 0;
                 } else {
                     fogRow = ((U32)fogDist * Fill_Fog_Factor) >> 8;
+                    fogRaw = fogRow;
                     fogRow &= 0xF000;
                 }
 
                 U32 spanLen = (remaining > 32) ? 32 : remaining;
 
-                for (U32 px = 0; px < spanLen; px++) {
-                    U32 U_int = (uvCur >> 8) & 0xFF;
-                    U32 V_int = (uvCur >> 24) & 0xFF;
-                    U32 mapIndex = (V_int << 8) | U_int;
-                    mapIndex &= POLYTZF_RepMaskPatch;
-                    U8 texel = POLYTZF_PtrMapPatch[mapIndex];
-                    *line++ = POLYTZF_PtrCLUT[fogRow + texel];
-                    uvCur += uvInc;
+                if (!PolyFogDither) {
+                    for (U32 px = 0; px < spanLen; px++) {
+                        U32 U_int = (uvCur >> 8) & 0xFF;
+                        U32 V_int = (uvCur >> 24) & 0xFF;
+                        U32 mapIndex = (V_int << 8) | U_int;
+                        mapIndex &= POLYTZF_RepMaskPatch;
+                        U8 texel = POLYTZF_PtrMapPatch[mapIndex];
+                        *line++ = POLYTZF_PtrCLUT[fogRow + texel];
+                        uvCur += uvInc;
+                    }
+                } else {
+                    U32 rows[4];
+                    const U32 col = PolyTZF_FogDitherRows((U32)(line - (PTR_U8)Log), fogRaw, rows);
+                    for (U32 px = 0; px < spanLen; px++) {
+                        U32 U_int = (uvCur >> 8) & 0xFF;
+                        U32 V_int = (uvCur >> 24) & 0xFF;
+                        U32 mapIndex = (V_int << 8) | U_int;
+                        mapIndex &= POLYTZF_RepMaskPatch;
+                        U8 texel = POLYTZF_PtrMapPatch[mapIndex];
+                        *line++ = POLYTZF_PtrCLUT[rows[(col + px) & 3] + texel];
+                        uvCur += uvInc;
+                    }
                 }
 
                 if (remaining <= 32)
@@ -378,10 +410,12 @@ S32 Filler_TextureZFogSmoothZBuf(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) 
                 S32 zBufVal = Fill_CurZBuf >> 8;
                 S32 fogDist = zBufVal - (S32)Fill_ScaledFogNear;
                 U32 fogRow;
+                U32 fogRaw = 0;
                 if (fogDist < 0) {
                     fogRow = 0;
                 } else {
                     fogRow = ((U32)fogDist * Fill_Fog_Factor) >> 8;
+                    fogRaw = fogRow;
                     fogRow &= 0xF000;
                 }
 
@@ -391,50 +425,99 @@ S32 Filler_TextureZFogSmoothZBuf(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) 
                 U32 spanLen = (remaining > 32) ? 32 : remaining;
                 U32 pixOfs = (U32)(line - ZBuf_PtrLog);
 
-                for (U32 px = 0; px < spanLen; px++) {
-                    U16 zComp = (U16)zRot;
+                if (!PolyFogDither) {
+                    for (U32 px = 0; px < spanLen; px++) {
+                        U16 zComp = (U16)zRot;
 
-                    if (ZBuf_PtrZBuf[pixOfs] >= zComp) {
-                        ZBuf_PtrZBuf[pixOfs] = zComp;
+                        if (ZBuf_PtrZBuf[pixOfs] >= zComp) {
+                            ZBuf_PtrZBuf[pixOfs] = zComp;
 
-                        U32 U_int = (uvCur >> 8) & 0xFF;
-                        U32 V_int = (uvCur >> 24) & 0xFF;
-                        U32 mapIndex = (V_int << 8) | U_int;
-                        mapIndex &= ZBuf_RepMaskPatch;
-                        U8 outIdx = ZBuf_PtrCLUT[fogRow + ZBuf_PtrMapPatch[mapIndex]];
-                        if (PolyTexFilter != POLY_TEX_FILTER_OFF) {
-                            /* Sea and sky stretch one 128x128 page over a whole
-                               world-sized quad, so their texels are the coarsest
-                               in the renderer. Fog row is per-pixel here, so each
-                               tap has to go through the CLUT before blending. */
-                            const U32 uNext = (U_int + 1) & 0xFF;
-                            const U32 qu = (uvCur & 0xFF) >> 6;
-                            const U32 iU = ((V_int << 8) | uNext) & ZBuf_RepMaskPatch;
-                            const U8 bU = ZBuf_PtrCLUT[fogRow + ZBuf_PtrMapPatch[iU]];
-                            outIdx = POLY_BLEND(outIdx, bU, qu);
-                            if (PolyTexFilter == POLY_TEX_FILTER_BILINEAR) {
-                                const U32 vNext = (V_int + 1) & 0xFF;
-                                const U32 iV = ((vNext << 8) | U_int) & ZBuf_RepMaskPatch;
-                                const U32 iUV = ((vNext << 8) | uNext) & ZBuf_RepMaskPatch;
-                                const U8 aV = ZBuf_PtrCLUT[fogRow + ZBuf_PtrMapPatch[iV]];
-                                const U8 bV = ZBuf_PtrCLUT[fogRow + ZBuf_PtrMapPatch[iUV]];
-                                const U8 lower = POLY_BLEND(aV, bV, qu);
-                                const U32 qv = ((uvCur >> 16) & 0xFF) >> 6;
-                                outIdx = POLY_BLEND(outIdx, lower, qv);
+                            U32 U_int = (uvCur >> 8) & 0xFF;
+                            U32 V_int = (uvCur >> 24) & 0xFF;
+                            U32 mapIndex = (V_int << 8) | U_int;
+                            mapIndex &= ZBuf_RepMaskPatch;
+                            U8 outIdx = ZBuf_PtrCLUT[fogRow + ZBuf_PtrMapPatch[mapIndex]];
+                            if (PolyTexFilter != POLY_TEX_FILTER_OFF) {
+                                /* Sea and sky stretch one 128x128 page over a whole
+                                   world-sized quad, so their texels are the coarsest
+                                   in the renderer. Fog row is per-pixel here, so each
+                                   tap has to go through the CLUT before blending. */
+                                const U32 uNext = (U_int + 1) & 0xFF;
+                                const U32 qu = (uvCur & 0xFF) >> 6;
+                                const U32 iU = ((V_int << 8) | uNext) & ZBuf_RepMaskPatch;
+                                const U8 bU = ZBuf_PtrCLUT[fogRow + ZBuf_PtrMapPatch[iU]];
+                                outIdx = POLY_BLEND(outIdx, bU, qu);
+                                if (PolyTexFilter == POLY_TEX_FILTER_BILINEAR) {
+                                    const U32 vNext = (V_int + 1) & 0xFF;
+                                    const U32 iV = ((vNext << 8) | U_int) & ZBuf_RepMaskPatch;
+                                    const U32 iUV = ((vNext << 8) | uNext) & ZBuf_RepMaskPatch;
+                                    const U8 aV = ZBuf_PtrCLUT[fogRow + ZBuf_PtrMapPatch[iV]];
+                                    const U8 bV = ZBuf_PtrCLUT[fogRow + ZBuf_PtrMapPatch[iUV]];
+                                    const U8 lower = POLY_BLEND(aV, bV, qu);
+                                    const U32 qv = ((uvCur >> 16) & 0xFF) >> 6;
+                                    outIdx = POLY_BLEND(outIdx, lower, qv);
+                                }
                             }
+                            ZBuf_PtrLog[pixOfs] = outIdx;
                         }
-                        ZBuf_PtrLog[pixOfs] = outIdx;
+
+                        uvCur += uvInc;
+
+                        /* Z interpolation: add/adc matching ASM */
+                        U32 oldZ = zRot;
+                        zRot += ZBuf_DecZ;
+                        U32 carry = (zRot < oldZ) ? 1 : 0;
+                        zRot += ZBuf_IntZ + carry;
+
+                        pixOfs++;
                     }
+                } else {
+                    /* The same loop on the dithered band of each pixel's
+                       column; every tap of the filter takes the pixel's band,
+                       so the blend still follows the fog. */
+                    U32 rows[4];
+                    const U32 col = PolyTZF_FogDitherRows(pixOfs, fogRaw, rows);
+                    for (U32 px = 0; px < spanLen; px++) {
+                        U16 zComp = (U16)zRot;
 
-                    uvCur += uvInc;
+                        if (ZBuf_PtrZBuf[pixOfs] >= zComp) {
+                            ZBuf_PtrZBuf[pixOfs] = zComp;
 
-                    /* Z interpolation: add/adc matching ASM */
-                    U32 oldZ = zRot;
-                    zRot += ZBuf_DecZ;
-                    U32 carry = (zRot < oldZ) ? 1 : 0;
-                    zRot += ZBuf_IntZ + carry;
+                            const U32 row = rows[(col + px) & 3];
+                            U32 U_int = (uvCur >> 8) & 0xFF;
+                            U32 V_int = (uvCur >> 24) & 0xFF;
+                            U32 mapIndex = (V_int << 8) | U_int;
+                            mapIndex &= ZBuf_RepMaskPatch;
+                            U8 outIdx = ZBuf_PtrCLUT[row + ZBuf_PtrMapPatch[mapIndex]];
+                            if (PolyTexFilter != POLY_TEX_FILTER_OFF) {
+                                const U32 uNext = (U_int + 1) & 0xFF;
+                                const U32 qu = (uvCur & 0xFF) >> 6;
+                                const U32 iU = ((V_int << 8) | uNext) & ZBuf_RepMaskPatch;
+                                const U8 bU = ZBuf_PtrCLUT[row + ZBuf_PtrMapPatch[iU]];
+                                outIdx = POLY_BLEND(outIdx, bU, qu);
+                                if (PolyTexFilter == POLY_TEX_FILTER_BILINEAR) {
+                                    const U32 vNext = (V_int + 1) & 0xFF;
+                                    const U32 iV = ((vNext << 8) | U_int) & ZBuf_RepMaskPatch;
+                                    const U32 iUV = ((vNext << 8) | uNext) & ZBuf_RepMaskPatch;
+                                    const U8 aV = ZBuf_PtrCLUT[row + ZBuf_PtrMapPatch[iV]];
+                                    const U8 bV = ZBuf_PtrCLUT[row + ZBuf_PtrMapPatch[iUV]];
+                                    const U8 lower = POLY_BLEND(aV, bV, qu);
+                                    const U32 qv = ((uvCur >> 16) & 0xFF) >> 6;
+                                    outIdx = POLY_BLEND(outIdx, lower, qv);
+                                }
+                            }
+                            ZBuf_PtrLog[pixOfs] = outIdx;
+                        }
 
-                    pixOfs++;
+                        uvCur += uvInc;
+
+                        U32 oldZ = zRot;
+                        zRot += ZBuf_DecZ;
+                        U32 carry = (zRot < oldZ) ? 1 : 0;
+                        zRot += ZBuf_IntZ + carry;
+
+                        pixOfs++;
+                    }
                 }
 
                 line += spanLen;
@@ -482,6 +565,8 @@ S32 Filler_TextureZFogSmoothNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
     S32 v = Fill_CurMapVMin;
     S32 w = Fill_CurWMin;
     U32 patch = Fill_Patch - 1;
+    /* The sea's refill filters here, objects do not (POLYFILT.H). */
+    const S32 filter = PolyTexFilterNZW ? PolyTexFilter : POLY_TEX_FILTER_OFF;
 
     static U32 NZW_RepMaskPatch;
     static PTR_U8 NZW_PtrMapPatch;
@@ -575,10 +660,12 @@ S32 Filler_TextureZFogSmoothNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
                 S32 zBufVal = Fill_CurZBuf >> 8;
                 S32 fogDist = zBufVal - (S32)Fill_ScaledFogNear;
                 U32 fogRow;
+                U32 fogRaw = 0;
                 if (fogDist < 0) {
                     fogRow = 0;
                 } else {
                     fogRow = ((U32)fogDist * Fill_Fog_Factor) >> 8;
+                    fogRaw = fogRow;
                     fogRow &= 0xF000;
                 }
 
@@ -588,28 +675,97 @@ S32 Filler_TextureZFogSmoothNZW(U32 nbLines, U32 fillCurXMin, U32 fillCurXMax) {
                 U32 spanLen = (remaining > 32) ? 32 : remaining;
                 U32 pixOfs = (U32)(line - NZW_PtrLog);
 
-                for (U32 px = 0; px < spanLen; px++) {
-                    U16 zComp = (U16)zRot;
+                if (!PolyFogDither) {
+                    for (U32 px = 0; px < spanLen; px++) {
+                        U16 zComp = (U16)zRot;
 
-                    if (NZW_PtrZBuf[pixOfs] >= zComp) {
-                        /* NZW: NO Z-buffer write */
-                        U32 U_int = (uvCur >> 8) & 0xFF;
-                        U32 V_int = (uvCur >> 24) & 0xFF;
-                        U32 mapIndex = (V_int << 8) | U_int;
-                        mapIndex &= NZW_RepMaskPatch;
-                        U8 texel = NZW_PtrMapPatch[mapIndex];
-                        NZW_PtrLog[pixOfs] = NZW_PtrCLUT[fogRow + texel];
+                        if (NZW_PtrZBuf[pixOfs] >= zComp) {
+                            /* NZW: NO Z-buffer write */
+                            U32 U_int = (uvCur >> 8) & 0xFF;
+                            U32 V_int = (uvCur >> 24) & 0xFF;
+                            U32 mapIndex = (V_int << 8) | U_int;
+                            mapIndex &= NZW_RepMaskPatch;
+                            U8 texel = NZW_PtrMapPatch[mapIndex];
+                            U8 outIdx = NZW_PtrCLUT[fogRow + texel];
+                            if (filter != POLY_TEX_FILTER_OFF) {
+                                /* As Filler_TextureZFogSmoothZBuf: each tap
+                                   through the CLUT on the pixel's fog row, then
+                                   blended. */
+                                const U32 uNext = (U_int + 1) & 0xFF;
+                                const U32 qu = (uvCur & 0xFF) >> 6;
+                                const U32 iU = ((V_int << 8) | uNext) & NZW_RepMaskPatch;
+                                const U8 bU = NZW_PtrCLUT[fogRow + NZW_PtrMapPatch[iU]];
+                                outIdx = POLY_BLEND(outIdx, bU, qu);
+                                if (filter == POLY_TEX_FILTER_BILINEAR) {
+                                    const U32 vNext = (V_int + 1) & 0xFF;
+                                    const U32 iV = ((vNext << 8) | U_int) & NZW_RepMaskPatch;
+                                    const U32 iUV = ((vNext << 8) | uNext) & NZW_RepMaskPatch;
+                                    const U8 aV = NZW_PtrCLUT[fogRow + NZW_PtrMapPatch[iV]];
+                                    const U8 bV = NZW_PtrCLUT[fogRow + NZW_PtrMapPatch[iUV]];
+                                    const U8 lower = POLY_BLEND(aV, bV, qu);
+                                    const U32 qv = ((uvCur >> 16) & 0xFF) >> 6;
+                                    outIdx = POLY_BLEND(outIdx, lower, qv);
+                                }
+                            }
+                            NZW_PtrLog[pixOfs] = outIdx;
+                        }
+
+                        uvCur += uvInc;
+
+                        /* Z interpolation: add/adc matching ASM */
+                        U32 oldZ = zRot;
+                        zRot += NZW_DecZ;
+                        U32 carry = (zRot < oldZ) ? 1 : 0;
+                        zRot += NZW_IntZ + carry;
+
+                        pixOfs++;
                     }
+                } else {
+                    U32 rows[4];
+                    const U32 col = PolyTZF_FogDitherRows(pixOfs, fogRaw, rows);
+                    for (U32 px = 0; px < spanLen; px++) {
+                        U16 zComp = (U16)zRot;
 
-                    uvCur += uvInc;
+                        if (NZW_PtrZBuf[pixOfs] >= zComp) {
+                            U32 U_int = (uvCur >> 8) & 0xFF;
+                            U32 V_int = (uvCur >> 24) & 0xFF;
+                            U32 mapIndex = (V_int << 8) | U_int;
+                            mapIndex &= NZW_RepMaskPatch;
+                            U8 texel = NZW_PtrMapPatch[mapIndex];
+                            const U32 row = rows[(col + px) & 3];
+                            U8 outIdx = NZW_PtrCLUT[row + texel];
+                            if (filter != POLY_TEX_FILTER_OFF) {
+                                /* As Filler_TextureZFogSmoothZBuf: each tap
+                                   through the CLUT on the pixel's fog row, then
+                                   blended. */
+                                const U32 uNext = (U_int + 1) & 0xFF;
+                                const U32 qu = (uvCur & 0xFF) >> 6;
+                                const U32 iU = ((V_int << 8) | uNext) & NZW_RepMaskPatch;
+                                const U8 bU = NZW_PtrCLUT[row + NZW_PtrMapPatch[iU]];
+                                outIdx = POLY_BLEND(outIdx, bU, qu);
+                                if (filter == POLY_TEX_FILTER_BILINEAR) {
+                                    const U32 vNext = (V_int + 1) & 0xFF;
+                                    const U32 iV = ((vNext << 8) | U_int) & NZW_RepMaskPatch;
+                                    const U32 iUV = ((vNext << 8) | uNext) & NZW_RepMaskPatch;
+                                    const U8 aV = NZW_PtrCLUT[row + NZW_PtrMapPatch[iV]];
+                                    const U8 bV = NZW_PtrCLUT[row + NZW_PtrMapPatch[iUV]];
+                                    const U8 lower = POLY_BLEND(aV, bV, qu);
+                                    const U32 qv = ((uvCur >> 16) & 0xFF) >> 6;
+                                    outIdx = POLY_BLEND(outIdx, lower, qv);
+                                }
+                            }
+                            NZW_PtrLog[pixOfs] = outIdx;
+                        }
 
-                    /* Z interpolation: add/adc matching ASM */
-                    U32 oldZ = zRot;
-                    zRot += NZW_DecZ;
-                    U32 carry = (zRot < oldZ) ? 1 : 0;
-                    zRot += NZW_IntZ + carry;
+                        uvCur += uvInc;
 
-                    pixOfs++;
+                        U32 oldZ = zRot;
+                        zRot += NZW_DecZ;
+                        U32 carry = (zRot < oldZ) ? 1 : 0;
+                        zRot += NZW_IntZ + carry;
+
+                        pixOfs++;
+                    }
                 }
 
                 line += spanLen;

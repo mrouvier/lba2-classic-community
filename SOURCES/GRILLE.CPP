@@ -55,6 +55,7 @@ typedef struct
 T_COLONB ListBrickColon[NB_COLON][MAX_BRICK];
 
 U8 *BufferMaskBrick = NULL;
+Func_GrilleBrickDrawn *GrilleBrickDrawn = NULL;
 S32 NbBlock;
 S32 DxBlock, DyBlock, DzBlock;
 
@@ -922,6 +923,8 @@ void AffBrickBlock(S32 block, S32 brick, S16 x, S16 y, S16 z) {
         // start having visible content. See WIDESCREEN_HARDCODED_DIMS_AUDIT.md.
         if (XScreen >= -47 AND XScreen < (S32)ModeDesiredX AND YScreen >= -38 AND YScreen < (S32)ModeDesiredY) {
             AffGraph(numbrick - 1, XScreen, YScreen, BufferBrick);
+            if (GrilleBrickDrawn)
+                GrilleBrickDrawn(numbrick - 1, XScreen, YScreen, x, y, z);
 
             // For XScreen in [-47,-25], (XScreen+24)/24 truncates to 0, so
             // those bricks share column 0 and DrawOverBrick* can re-mask their
@@ -1101,6 +1104,8 @@ void AffBrickBlockOnly(S32 block, S32 brick, S16 x, S16 y, S16 z) {
         // pixels on screen when the width is off the 24-px grid.
         if (XScreen >= -47 AND XScreen < (S32)ModeDesiredX AND YScreen >= -38 AND YScreen < (S32)ModeDesiredY) {
             AffGraph(numbrick - 1, XScreen, YScreen, BufferBrick);
+            if (GrilleBrickDrawn) /* the labyrinth's slabs, drawn each frame, come while it is NULL */
+                GrilleBrickDrawn(numbrick - 1, XScreen, YScreen, x, y, z);
         }
     }
 }
