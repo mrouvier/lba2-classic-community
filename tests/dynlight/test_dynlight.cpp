@@ -400,6 +400,28 @@ static void test_the_view_and_the_faces_take_the_light(void) {
     ASSERT_EQ_INT(192, DynLight_IsoStrength(80));
 }
 
+static void test_a_body_shade_takes_the_light_it_faces(void) {
+    const float v[3] = {0.0f, 0.0f, 0.0f};
+    const float rel[2][4] = {{0.0f, 500.0f, 0.0f, 2000.0f * 2000.0f}, {0.0f, -500.0f, 0.0f, 2000.0f * 2000.0f}};
+    const S32 level[2] = {176, 176};
+    /* A unit normal up: the light above raises it, the one below does not. */
+    const U16 up = DynLight_BodyShade(1000, v, 0.0f, 16384.0f, 0.0f, rel, level, 1);
+    ASSERT_TRUE(up > 1000);
+    ASSERT_EQ_INT(1000, DynLight_BodyShade(1000, v, 0.0f, 16384.0f, 0.0f, rel + 1, level, 1));
+    /* Facing it full on, at 500 of a 2000 reach: (15/16)^2 of 176 sixteenths, half of it in rows. */
+    ASSERT_TRUE(up - 1000 > 1200 && up - 1000 < 1500);
+    /* Never past the top the normal's length allows, never lowered. */
+    ASSERT_EQ_INT(3840, DynLight_BodyShade(3800, v, 0.0f, 16384.0f, 0.0f, rel, level, 1));
+    ASSERT_EQ_INT(1920, DynLight_BodyShade(1900, v, 0.0f, 8192.0f, 0.0f, rel, level, 1)); /* half a unit normal */
+    ASSERT_EQ_INT(4000, DynLight_BodyShade(4000, v, 0.0f, 16384.0f, 0.0f, rel, level, 1));
+    /* Out of reach, or a null normal: as it was. */
+    ASSERT_EQ_INT(1000, DynLight_BodyShade(1000, v, 0.0f, 0.0f, 0.0f, rel, level, 1));
+    {
+        const float far[1][4] = {{0.0f, 2500.0f, 0.0f, 2000.0f * 2000.0f}};
+        ASSERT_EQ_INT(1000, DynLight_BodyShade(1000, v, 0.0f, 16384.0f, 0.0f, far, level, 1));
+    }
+}
+
 int main(void) {
     RUN_TEST(test_a_pool_is_found_at_its_centre);
     RUN_TEST(test_no_pool_on_plain_or_dim_ground);
@@ -417,6 +439,7 @@ int main(void) {
     RUN_TEST(test_a_brick_shows_three_faces);
     RUN_TEST(test_a_background_pixel_reads_back_its_point);
     RUN_TEST(test_the_view_and_the_faces_take_the_light);
+    RUN_TEST(test_a_body_shade_takes_the_light_it_faces);
     TEST_SUMMARY();
     return test_failures != 0;
 }

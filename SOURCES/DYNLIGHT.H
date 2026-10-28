@@ -20,8 +20,9 @@ struct T_SETTING; /* SETTINGS.H; a pointer to a table needs no more */
  *      cast a pool on the ground and the walls around them, baked into the
  *      background on each full redraw with a halo about each globe, and the
  *      magic ball, the spells and the flames light what they pass over,
- *      every frame, outdoors and indoors. A palette pixel can only climb its
- *      own 16-shade ramp, so these pools are brightness, not colour.
+ *      every frame, outdoors and indoors; the actors' bodies take them on
+ *      their shading. A palette pixel can only climb its own 16-shade ramp,
+ *      so these pools are brightness, not colour.
  *   2, Colour: the same pools, and a stage at present time, where the frame
  *      is turned from palette indices into true colour: the lights tint what
  *      they light in their own colour, and a glow in that colour surrounds
@@ -484,6 +485,41 @@ static inline S32 DynLight_IsoLambert(float dot, float dist) {
     return w <= 0.0f ? 0 : (w >= 1.0f ? 256 : (S32)(w * 256.0f));
 }
 
+/* A body's shade at one point (ListLights: 8.8, the row of the 16-shade
+   ramp and its fraction), raised by the point lights near it that its
+   normal faces. `v` is the point and `n` its normal (the body's raw S16
+   scale, 16384 for a unit normal), `rel` the lights about the body: x, y, z
+   and the reach squared, with their levels in sixteenths of a row. A face
+   toward a light at full level gains half the level in rows
+   (DYN_BODY_GAIN); a shade is never lowered, and never raised past the top
+   the scene's light gives that normal (|n| * 15360 / 65536, at most 15
+   rows), so the fillers stay in their ramp and fog band. */
+#define DYN_BODY_GAIN 2048.0f /* the shade gained is level * cos * |n| / (16 * this), 256ths of a row */
+static inline U16 DynLight_BodyShade(U16 orig, const float *v, float nx, float ny, float nz, const float (*rel)[4],
+                                     const S32 *level, S32 n) {
+    const float nl2 = nx * nx + ny * ny + nz * nz;
+    float add = 0.0f;
+    S32 k, cap, val;
+    if (nl2 <= 0.0f)
+        return orig;
+    for (k = 0; k < n; k++) {
+        const float dx = rel[k][0] - v[0], dy = rel[k][1] - v[1], dz = rel[k][2] - v[2];
+        const float d2 = dx * dx + dy * dy + dz * dz, dot = nx * dx + ny * dy + nz * dz;
+        if (d2 >= rel[k][3] || dot <= 0.0f)
+            continue;
+        add += (float)DynLight_FalloffF(d2, 1.0f / rel[k][3], level[k]) * dot / (sqrtf(d2) * DYN_BODY_GAIN);
+    }
+    if (add < 1.0f)
+        return orig;
+    cap = (S32)(sqrtf(nl2) * (15360.0f / 65536.0f));
+    if (cap > 3840)
+        cap = 3840;
+    val = (S32)orig + (S32)add;
+    if (val > cap)
+        val = cap;
+    return (U16)(val > (S32)orig ? val : (S32)orig);
+}
+
 /* Engine hooks (DYNLIGHT.CPP). Each returns at once while DynLight is 0, but
    DynLight_CubeLoaded, which keeps the cube's number for when it is turned on.
    The lamps of a cube are found the first time it is drawn with the light on
@@ -513,6 +549,13 @@ extern void DynLight_IsoEnd(void);
    the scene and before the incrusts; at level 2 the frame the colour stage
    reads is kept here too. */
 extern void DynLight_MovingPass(void);
+/* OBJECT.CPP, AffScene: the bodies BaseSort draws take the point lights
+   on their shades (ObjLightHook, AFF_OBJ.H) between these two; a body baked
+   into the background (DynLight_BodyBackground set before it) takes only the
+   static ones, which hold until the next full redraw as it does. */
+extern void DynLight_BeginBodies(void);
+extern void DynLight_EndBodies(void);
+extern void DynLight_BodyBackground(S32 background);
 /* The colour stage, at present time (SetPresentLightCallback): `argb` is the
    frame Phys was just converted to, `pitch` in bytes, `pal` the palette it was
    converted with. Pure: it reads what the last scene kept and writes `argb`. */

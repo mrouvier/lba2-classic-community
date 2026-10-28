@@ -1938,6 +1938,190 @@ void DynLight_PresentStage(U32 *argb, U32 pitch, U32 w, U32 h, const U8 *pal) {
 }
 
 /*══════════════════════════════════════════════════════════════════════════*
+    The bodies
+ *══════════════════════════════════════════════════════════════════════════*/
+
+/* A light as the bodies see it: relative to the camera, in the camera's
+   axes (as PosXWr..), with z toward the far side as the body renderer counts
+   it, and its reach squared. */
+typedef struct {
+    float x, y, z;
+    float r2;
+    S32 level;
+} T_DYN_BODYLIGHT;
+#define DYN_BODY_LIGHTS (DYN_STATIC_LIGHTS + DYN_MOVING_LIGHTS)
+static T_DYN_BODYLIGHT s_body[DYN_BODY_LIGHTS];
+static S32 s_nbBody = 0; /* the static ones first, then the moving ones */
+static S32 s_nbBodyStatic = 0;
+static S32 s_bodyBackground = 0; /* the body being drawn is baked into the background */
+static void DynLight_ObjLight(const T_BODY_HEADER *body, const TYPE_MAT *mats, S32 nbMats, S32 posX, S32 posY,
+                              S32 posZ, U16 *lights);
+
+/* AFF_OBJ.CPP's groups, which it keeps to itself: each group's pivot group,
+   pivot point, points and face normals, in order. */
+typedef struct {
+    U16 OrgGroupe;
+    U16 OrgPoint;
+    U16 NbPts;
+    U16 NbNorm;
+} T_DYN_GROUPE;
+
+#define DYN_BODY_POINTS 550 /* AFF_OBJ.CPP's MAX_NB_POINTS and MAX_NB_POLYS */
+static float s_vpos[DYN_BODY_POINTS][3];
+static S16 s_faceAt[DYN_BODY_POINTS];
+
+static void DynLight_BodyAdd(float x, float y, float z, float reach, S32 level) {
+    T_DYN_BODYLIGHT *b;
+    if (s_nbBody >= DYN_BODY_LIGHTS || level <= 0)
+        return;
+    b = &s_body[s_nbBody++];
+    b->x = x;
+    b->y = y;
+    b->z = z;
+    b->r2 = reach * reach;
+    b->level = level;
+}
+
+/* A light as the bodies see it, from the frame's: outdoors its camera space
+   with the depth turned back (the renderer's z grows away from the eye's
+   side the other way), indoors its world position less the camera. */
+static void DynLight_BodyFrom(const T_DYN_LIGHT *l) {
+    if (s_iso)
+        DynLight_BodyAdd(l->x - (float)CameraXr, l->y - (float)CameraYr, l->z - (float)CameraZr, l->reach,
+                         l->level);
+    else
+        DynLight_BodyAdd(l->x, l->y, -l->z, l->reach, l->level);
+}
+
+void DynLight_BeginBodies(void) {
+    S32 k;
+    ObjLightHook = NULL;
+    s_nbBody = s_nbBodyStatic = 0;
+    if (!DynLight)
+        return;
+    s_iso = CubeMode != CUBE_EXTERIEUR;
+    if (DynLight_StaticOn())
+        for (k = 0; k < s_nbStatic; k++)
+            DynLight_BodyFrom(&s_static[k]);
+    s_nbBodyStatic = s_nbBody;
+    DynLight_GatherMoving(); /* the moving pass gathers them again, the same, after the bodies */
+    for (k = 0; k < s_nbMoving; k++)
+        DynLight_BodyFrom(&s_moving[k]);
+    if (s_nbBody)
+        ObjLightHook = DynLight_ObjLight;
+}
+
+void DynLight_EndBodies(void) {
+    ObjLightHook = NULL;
+}
+
+void DynLight_BodyBackground(S32 background) {
+    s_bodyBackground = background;
+}
+
+/* ObjLightHook: the lights near the body raise the shade of each point, by
+   its normal, then of each face normal, at the point of the first flat
+   polygon that uses it. The body's points are rotated again here, from its
+   own data and matrices: the renderer's rotated points hold a sort key in
+   place of their depth indoors. Nothing but `lights` is written. */
+static void DynLight_ObjLight(const T_BODY_HEADER *body, const TYPE_MAT *mats, S32 nbMats, S32 posX, S32 posY,
+                              S32 posZ, U16 *lights) {
+    const U8 *base = (const U8 *)body;
+    const T_OBJ_POINT *pts = (const T_OBJ_POINT *)(base + body->OffPoints);
+    const TYPE_VT16 *nrm = (const TYPE_VT16 *)(base + body->OffNormales);
+    const TYPE_VT16 *nf = (const TYPE_VT16 *)(base + body->OffNormFaces);
+    const T_DYN_GROUPE *grp = (const T_DYN_GROUPE *)(base + body->OffGroupes);
+    const S32 nbLights = s_bodyBackground ? s_nbBodyStatic : s_nbBody;
+    float rel[DYN_BODY_LIGHTS][4];
+    S32 level[DYN_BODY_LIGHTS];
+    float size;
+    S32 k, n = 0, g, i, faceBase;
+    if (body->NbPoints <= 0 || body->NbPoints > DYN_BODY_POINTS || body->NbNormFaces > DYN_BODY_POINTS ||
+        nbMats <= 0 || nbMats > 30)
+        return;
+    /* The body's reach: its box, doubled for the limbs its animation swings. */
+    size = (float)(abs(body->XMin) + abs(body->XMax) + abs(body->YMin) + abs(body->YMax) + abs(body->ZMin) +
+                   abs(body->ZMax));
+    for (k = 0; k < nbLights; k++) {
+        const float dx = s_body[k].x - (float)posX, dy = s_body[k].y - (float)posY, dz = s_body[k].z - (float)posZ;
+        const float r = sqrtf(s_body[k].r2) + size;
+        if (dx * dx + dy * dy + dz * dz >= r * r)
+            continue;
+        rel[n][0] = dx;
+        rel[n][1] = dy;
+        rel[n][2] = dz;
+        rel[n][3] = s_body[k].r2;
+        level[n] = s_body[k].level;
+        n++;
+    }
+    if (!n)
+        return;
+
+    /* The points, group by group, each through its group's matrix. */
+    i = 0;
+    for (g = 0; g < nbMats && i < body->NbPoints; g++) {
+        const TYPE_MAT *m = &mats[g];
+        const S32 count = nbMats == 1 ? body->NbPoints : grp[g].NbPts;
+        S32 j;
+        for (j = 0; j < count && i < body->NbPoints; j++, i++) {
+            const float px = pts[i].X, py = pts[i].Y, pz = pts[i].Z;
+            float *v = s_vpos[i];
+            v[0] = m->F.M11 * px + m->F.M12 * py + m->F.M13 * pz + m->F.TX;
+            v[1] = m->F.M21 * px + m->F.M22 * py + m->F.M23 * pz + m->F.TY;
+            v[2] = m->F.M31 * px + m->F.M32 * py + m->F.M33 * pz + m->F.TZ;
+            if (i < body->NbNormales) {
+                const float nx = nrm[i].X, ny = nrm[i].Y, nz = nrm[i].Z;
+                lights[i] = DynLight_BodyShade(lights[i], v, m->F.M11 * nx + m->F.M12 * ny + m->F.M13 * nz,
+                                               m->F.M21 * nx + m->F.M22 * ny + m->F.M23 * nz,
+                                               m->F.M31 * nx + m->F.M32 * ny + m->F.M33 * nz, rel, level, n);
+            }
+        }
+    }
+    if (body->NbNormFaces <= 0)
+        return;
+
+    /* The face normals, which sit at ListLights + NbPoints (ObjectDisplay) or
+       + NbNormales (BodyDisplay): each at the first point of the first flat
+       polygon that reads it (a polygon's normal index, at byte 10 of every
+       record, is absolute). The polygon blocks as DynLight_TopColour walks
+       them. */
+    faceBase = nbMats == 1 ? body->NbNormales : body->NbPoints;
+    for (k = 0; k < body->NbNormFaces; k++)
+        s_faceAt[k] = -1;
+    {
+        const U8 *p = base + body->OffPolys, *end = base + body->OffLines;
+        while (p + 8 <= end) {
+            const U16 type = ((const U16 *)p)[0], nb = ((const U16 *)p)[1];
+            const S32 quad = (type & (1 << 15)) != 0, kind = type & 0xFF;
+            const S32 rec = (type & (1 << 14)) ? 16 : (kind <= 7 ? 12 : (quad ? 32 : 24));
+            const S32 flat = kind == 1 || kind == 9 || kind == 13 || kind == 17 || kind == 21;
+            S32 r;
+            p += 8;
+            for (r = 0; r < nb && p + rec <= end; r++, p += rec) {
+                const S32 f = (S32)((const U16 *)p)[5] - faceBase, p1 = ((const U16 *)p)[0];
+                if (flat && f >= 0 && f < body->NbNormFaces && s_faceAt[f] < 0 && p1 < body->NbPoints)
+                    s_faceAt[f] = (S16)p1;
+            }
+        }
+    }
+    i = 0;
+    for (g = 0; g < nbMats && i < body->NbNormFaces; g++) {
+        const TYPE_MAT *m = &mats[g];
+        const S32 count = nbMats == 1 ? body->NbNormFaces : grp[g].NbNorm;
+        S32 j;
+        for (j = 0; j < count && i < body->NbNormFaces; j++, i++) {
+            const float nx = nf[i].X, ny = nf[i].Y, nz = nf[i].Z;
+            if (s_faceAt[i] < 0)
+                continue;
+            lights[faceBase + i] = DynLight_BodyShade(
+                lights[faceBase + i], s_vpos[s_faceAt[i]], m->F.M11 * nx + m->F.M12 * ny + m->F.M13 * nz,
+                m->F.M21 * nx + m->F.M22 * ny + m->F.M23 * nz, m->F.M31 * nx + m->F.M32 * ny + m->F.M33 * nz, rel,
+                level, n);
+        }
+    }
+}
+
+/*══════════════════════════════════════════════════════════════════════════*
     The frame's pass
  *══════════════════════════════════════════════════════════════════════════*/
 

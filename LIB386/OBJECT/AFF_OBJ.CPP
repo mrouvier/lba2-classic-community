@@ -60,6 +60,7 @@ U32 NbGroupes = 0;                     // Nb of groups in object
 T_OBJ_GROUPE *PtrGroupes = 0;          // Pointer on groups definition
 TYPE_MAT *Current_Matrix = NULL;       // Pointer on current matrix
 Func_TransNumPtr *TransFctBody = NULL; // Pointer to a conversion fct that converts a body number into its address
+Func_ObjLight *ObjLightHook = NULL;    // Point lights on a body's shades (AFF_OBJ.H); NULL: the scene's light alone
 
 // Light list
 U16 ListLights[MAX_NB_POINTS + MAX_NB_POLYS];
@@ -1689,6 +1690,9 @@ S32 ObjectDisplay(T_OBJ_3D *obj) {
         return 0;
     }
 
+    if (ObjLightHook != NULL)
+        ObjLightHook(lBody, TabMat, (S32)lBody->NbGroupes, PosXWr, PosYWr, PosZWr, ListLights);
+
     return EntityCreation(lBody);
 }
 
@@ -1724,6 +1728,9 @@ S32 Return_BodyDisplay(TYPE_MAT *srcMatrix, TYPE_MAT *dstMatrix, S32 alpha, S32 
     srcLights = (TYPE_VT16 *)((U8 *)body + body->OffNormFaces);
     LightList(TabMat, ListLights + body->NbNormales,
               srcLights, body->NbNormFaces);
+
+    if (ObjLightHook != NULL)
+        ObjLightHook(body, TabMat, 1, PosXWr, PosYWr, PosZWr, ListLights);
 
     return EntityCreation(lBody);
 }

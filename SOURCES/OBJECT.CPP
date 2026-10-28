@@ -4947,6 +4947,9 @@ S32 AffOneObject(T_SORT *pt) {
             SetClip(0, 0, ModeDesiredX - 1, FlagWater);
         }
 
+        /* A body baked into the background keeps the lights it had then:
+           only the static ones light it (DynLight_BodyBackground). */
+        DynLight_BodyBackground((ptrobj->Flags & OBJ_BACKGROUND) != 0);
         aff = ObjectDisplay(&ptrobj->Obj);
 
         if (aff) /* objet pas tout clippé */
@@ -5354,6 +5357,7 @@ S32 AffOneObject(T_SORT *pt) {
     case TYPE_DART:
         ptrd = &ListDart[numobj];
 
+        DynLight_BodyBackground(FALSE);
         aff = BodyDisplay_AlphaBeta(ptrd->PosX, ptrd->PosY, ptrd->PosZ,
                                     ptrd->Alpha, ptrd->Beta, 0,
                                     (U8 *)GivePtrObjFix(ptrd->Body));
@@ -5861,7 +5865,10 @@ startaffscene:
     PtrMap = ObjPtrMap = BufferTexture;
     RepMask = 0xFFFF;
 
+    /* The point lights on the bodies BaseSort draws, and on no other. */
+    DynLight_BeginBodies();
     if (BaseSort()) {
+        DynLight_EndBodies();
         // NumObjFollow masqué on
         // doit redessiner la camera
         if (flagflip == AFF_ALL_FLIP OR flagflip == AFF_ALL_NO_FLIP) {
@@ -5872,6 +5879,7 @@ startaffscene:
         flagflip = AFF_ALL_FLIP;
         goto startaffscene;
     }
+    DynLight_EndBodies();
 
     /*------------------------------------------------------------------------*/
     if (CubeMode == CUBE_EXTERIEUR) {
